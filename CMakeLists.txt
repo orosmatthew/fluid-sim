@@ -23,6 +23,10 @@ set(SOURCE_FILES
 
 add_executable(${PROJECT_NAME} ${SOURCE_FILES})
 
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_link_libraries(${PROJECT_NAME} -static-libgcc -static-libstdc++)
+endif ()
+
 target_include_directories(${PROJECT_NAME} PRIVATE ${LIB_INCLUDES})
 
 target_link_libraries(${PROJECT_NAME} raylib raylib_cpp)
