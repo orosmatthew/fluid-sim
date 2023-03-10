@@ -11,8 +11,8 @@
 
 namespace rl = raylib;
 
-const int N = 64;
-const int iter = 16;
+const int N = 128;
+const int iter = 4;
 
 struct FluidCube {
     int size {};
@@ -222,28 +222,25 @@ static void fluid_cube_step(FluidCube& cube)
     }
 }
 
-void draw_fluid(const FluidCube& cube)
+void draw_fluid(const FluidCube& cube, rl::Image& image, rl::Texture& texture)
 {
     for (int i = 0; i < cube.size; i++) {
         for (int j = 0; j < cube.size; j++) {
-            float x = static_cast<float>(i) * 10.0f;
-            float y = static_cast<float>(j) * 10.0f;
             float d = cube.density[IX(i, j)];
             d = std::clamp(d, 0.0f, 255.0f);
-            DrawRectangle(
-                static_cast<int>(x),
-                static_cast<int>(y),
-                10.0f,
-                10.0f,
-                rl::Color(static_cast<char>(d), static_cast<char>(d), static_cast<char>(d), 255));
+            image.DrawPixel(i, j, rl::Color(static_cast<char>(d), static_cast<char>(d), static_cast<char>(d), 255));
         }
     }
+    texture.Update(image.data);
+    texture.Draw(rl::Vector2(0, 0), 0.0f, 5.0f);
 }
 
 struct State {
     util::FixedLoop fixed_loop;
     FluidCube cube;
     rl::Vector2 prev_pos;
+    rl::Image image;
+    rl::Texture texture;
 };
 
 const int screen_width = 640;
@@ -252,38 +249,41 @@ const int screen_height = 640;
 void main_loop(void* state_ptr)
 {
     State& state = *static_cast<State*>(state_ptr);
-    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        rl::Vector2 pos = GetMousePosition();
-        pos /= 10.0f;
-        pos = pos.Clamp(
-            { 0.0f, 0.0f },
-            { static_cast<float>(screen_width) / 10.0f - 1, static_cast<float>(screen_height) / 10.0f - 1 });
-        state.prev_pos /= 10.0f;
-        state.prev_pos = state.prev_pos.Clamp(
-            { 0.0f, 0.0f },
-            { static_cast<float>(screen_width) / 10.0f - 1, static_cast<float>(screen_height) / 10.0f - 1 });
-        float amount_x = pos.x - state.prev_pos.x;
-        float amount_y = pos.y - state.prev_pos.y;
-        fluid_cube_add_density(state.cube, static_cast<int>(pos.x), static_cast<int>(pos.y), 100.0f);
-        fluid_cube_add_velocity(state.cube, static_cast<int>(pos.x), static_cast<int>(pos.y), amount_x, amount_y);
-    }
 
-    if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
-        rl::Vector2 pos = GetMousePosition();
-        pos /= 10.0f;
-        pos = pos.Clamp(
-            { 0.0f, 0.0f },
-            { static_cast<float>(screen_width) / 10.0f - 1, static_cast<float>(screen_height) / 10.0f - 1 });
-        fluid_cube_add_density(state.cube, static_cast<int>(pos.x), static_cast<int>(pos.y), -100.0f);
-    }
-    state.prev_pos = GetMousePosition();
+    state.fixed_loop.update(5, [&]() {
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            rl::Vector2 pos = GetMousePosition();
+            pos /= 5.0f;
+            pos = pos.Clamp(
+                { 0.0f, 0.0f },
+                { static_cast<float>(screen_width) / 5.0f - 1, static_cast<float>(screen_height) / 5.0f - 1 });
+            state.prev_pos /= 5.0f;
+            state.prev_pos = state.prev_pos.Clamp(
+                { 0.0f, 0.0f },
+                { static_cast<float>(screen_width) / 5.0f - 1, static_cast<float>(screen_height) / 5.0f - 1 });
+            float amount_x = pos.x - state.prev_pos.x;
+            float amount_y = pos.y - state.prev_pos.y;
+            fluid_cube_add_density(state.cube, static_cast<int>(pos.x), static_cast<int>(pos.y), 1000.0f);
+            fluid_cube_add_velocity(state.cube, static_cast<int>(pos.x), static_cast<int>(pos.y), amount_x, amount_y);
+        }
 
-    state.fixed_loop.update(5, [&]() { fluid_cube_step(state.cube); });
+        if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+            rl::Vector2 pos = GetMousePosition();
+            pos /= 5.0f;
+            pos = pos.Clamp(
+                { 0.0f, 0.0f },
+                { static_cast<float>(screen_width) / 5.0f - 1, static_cast<float>(screen_height) / 5.0f - 1 });
+            fluid_cube_add_density(state.cube, static_cast<int>(pos.x), static_cast<int>(pos.y), -1000.0f);
+        }
+        state.prev_pos = GetMousePosition();
+
+        fluid_cube_step(state.cube);
+    });
 
     BeginDrawing();
 
     ClearBackground(BLACK);
-    draw_fluid(state.cube);
+    draw_fluid(state.cube, state.image, state.texture);
     DrawFPS(10, 10);
 
     EndDrawing();
@@ -295,9 +295,11 @@ int main()
 
     rl::Window window(screen_width, screen_height, "Fluid Sim");
 
-    State state {
-        .fixed_loop = util::FixedLoop(60.0f), .cube = fluid_cube_create(64, 0.000002f, 0.00001f, 0.1f), .prev_pos {}
-    };
+    State state { .fixed_loop = util::FixedLoop(60.0f),
+                  .cube = fluid_cube_create(128, 0.000001f, 0.0f, 0.1f),
+                  .prev_pos {},
+                  .image = rl::Image(128, 128, rl::Color::Black()),
+                  .texture = rl::Texture(state.image) };
 
 #if defined(PLATFORM_WEB)
     emscripten_set_main_loop_arg(main_loop, &state, 0, 1);
