@@ -35,7 +35,7 @@ static size_t IX(int x, int y)
     return static_cast<size_t>(x) + static_cast<size_t>(y) * N;
 }
 
-static FluidCube fluid_cube_create(int size, int diffusion, int viscosity, float dt)
+static FluidCube fluid_cube_create(int size, float diffusion, float viscosity, float dt)
 {
     assert(size > 0);
     FluidCube cube;
@@ -295,7 +295,9 @@ int main()
 
     rl::Window window(screen_width, screen_height, "Fluid Sim");
 
-    State state { .fixed_loop = util::FixedLoop(60.0f), .cube = fluid_cube_create(64, 0, 0, 0.1f), .prev_pos {} };
+    State state {
+        .fixed_loop = util::FixedLoop(60.0f), .cube = fluid_cube_create(64, 0.000002f, 0.00001f, 0.1f), .prev_pos {}
+    };
 
 #if defined(PLATFORM_WEB)
     emscripten_set_main_loop_arg(main_loop, &state, 0, 1);
