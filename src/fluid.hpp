@@ -3,14 +3,16 @@
 #include <algorithm>
 #include <cassert>
 #include <functional>
-#include <iostream>
 #include <vector>
 
 class Fluid {
 public:
-    inline Fluid(int size, float diffusion, float viscosity, float dt, int iter)
+    inline Fluid(int size, float diffusion, float viscosity, int iter)
     {
         assert(size > 0);
+        assert(diffusion >= 0.0f);
+        assert(viscosity >= 0.0f);
+        assert(iter > 0);
 
         m_size = size;
         m_diff = diffusion;
@@ -34,27 +36,27 @@ public:
 
     inline void step(float time_step)
     {
-        for (size_t i = 0; i < m_size; i++) {
-            m_density[i] = std::clamp(m_density[i], 0.0f, 10.0f);
+        for (size_t i = 0; i < m_size * m_size; i++) {
+            m_density[i] = std::clamp(m_density[i], 0.0f, 10000.0f);
         }
 
-        diffuse(1, m_vel_x, m_vel_x_next, m_viscosity, time_step, m_size, m_lin_solve_iterations);
-        diffuse(2, m_vel_y, m_vel_y_next, m_viscosity, time_step, m_size, m_lin_solve_iterations);
+        diffuse(BoundaryType::neumann, m_vel_x, m_vel_x_next, m_viscosity, time_step, m_size, m_lin_solve_iterations);
+        diffuse(BoundaryType::neumann, m_vel_y, m_vel_y_next, m_viscosity, time_step, m_size, m_lin_solve_iterations);
 
         calc_pressure(m_vel_x_next, m_vel_y_next, m_pressure, m_divergence, m_size, m_lin_solve_iterations);
         correct_velocity(m_vel_x_next, m_vel_y_next, m_pressure, m_size);
 
-        advect(1, m_vel_x_next, m_vel_x, m_vel_x_next, m_vel_y_next, time_step, m_size);
-        advect(2, m_vel_y_next, m_vel_y, m_vel_x_next, m_vel_y_next, time_step, m_size);
+        advect(BoundaryType::neumann, m_vel_x_next, m_vel_x, m_vel_x_next, m_vel_y_next, time_step, m_size);
+        advect(BoundaryType::neumann, m_vel_y_next, m_vel_y, m_vel_x_next, m_vel_y_next, time_step, m_size);
 
         calc_pressure(m_vel_x, m_vel_y, m_pressure, m_divergence, m_size, m_lin_solve_iterations);
         correct_velocity(m_vel_x, m_vel_y, m_pressure, m_size);
 
-        diffuse(0, m_density, m_s, m_diff, time_step, m_size, m_lin_solve_iterations);
-        advect(0, m_s, m_density, m_vel_x, m_vel_y, time_step, m_size);
+        diffuse(BoundaryType::fixed, m_density, m_s, m_diff, time_step, m_size, m_lin_solve_iterations);
+        advect(BoundaryType::fixed, m_s, m_density, m_vel_x, m_vel_y, time_step, m_size);
 
-        for (size_t i = 0; i < m_size; i++) {
-            m_density[i] = std::clamp(m_density[i], 0.0f, 10.0f);
+        for (size_t i = 0; i < m_size * m_size; i++) {
+            m_density[i] = std::clamp(m_density[i], 0.0f, 10000.0f);
         }
     }
 
@@ -133,22 +135,45 @@ private:
         return static_cast<size_t>(x) + static_cast<size_t>(y) * size;
     }
 
-    inline static void set_bnd(int b, std::vector<float>& x, int size)
-    {
-        for (int i = 1; i < size - 1; i++) {
-            x[index(i, 0, size)] = b == 2 ? -x[index(i, 1, size)] : x[index(i, 1, size)];
-            x[index(i, size - 1, size)] = b == 2 ? -x[index(i, size - 2, size)] : x[index(i, size - 2, size)];
-        }
-        for (int j = 1; j < size - 1; j++) {
-            x[index(0, j, size)] = b == 1 ? -x[index(1, j, size)] : x[index(1, j, size)];
-            x[index(size - 1, j, size)] = b == 1 ? -x[index(size - 2, j, size)] : x[index(size - 2, j, size)];
-        }
+    enum class BoundaryType {
+        none, // No boundary condition, used for free surface boundaries
+        fixed, // Fixed boundary condition, aka Dirichlet condition
+        neumann // Neumann boundary condition, aka zero-gradient condition
+    };
 
-        x[index(0, 0, size)] = 0.5f * (x[index(1, 0, size)] + x[index(0, 1, size)]);
-        x[index(0, size - 1, size)] = 0.5f * (x[index(1, size - 1, size)] + x[index(0, size - 2, size)]);
-        x[index(size - 1, 0, size)] = 0.5f * (x[index(size - 2, 0, size)] + x[index(size - 1, 1, size)]);
-        x[index(size - 1, size - 1, size)]
-            = 0.5f * (x[index(size - 2, size - 1, size)] + x[index(size - 1, size - 2, size)]);
+    inline static void set_bnd(BoundaryType boundary_type, std::vector<float>& x, int size)
+    {
+        // Boundary conditions for left and right
+        for (int i = 1; i < size - 1; i++) {
+            if (boundary_type == BoundaryType::neumann) { // Set boundary values to negative of adjacent value
+                x[index(i, 0, size)] = -x[index(i, 1, size)];
+                x[index(i, size - 1, size)] = -x[index(i, size - 2, size)];
+            }
+            else if (boundary_type == BoundaryType::fixed) { // Set boundary values to same value as the adjacent value
+                x[index(i, 0, size)] = x[index(i, 1, size)];
+                x[index(i, size - 1, size)] = x[index(i, size - 2, size)];
+            }
+        }
+        // Boundary conditions for top and bottom
+        for (int j = 1; j < size - 1; j++) {
+            if (boundary_type == BoundaryType::neumann) {
+                x[index(0, j, size)] = -x[index(1, j, size)];
+                x[index(size - 1, j, size)] = -x[index(size - 2, j, size)];
+            }
+            else if (boundary_type == BoundaryType::fixed) {
+                x[index(0, j, size)] = x[index(1, j, size)];
+                x[index(size - 1, j, size)] = x[index(size - 2, j, size)];
+            }
+        }
+        // Boundary condition for corners
+        if (boundary_type == BoundaryType::fixed) {
+            x[index(0, 0, size)] = 0.5f * (x[index(1, 0, size)] + x[index(0, 1, size)]);
+            x[index(0, size - 1, size)] = 0.5f * (x[index(1, size - 1, size)] + x[index(0, size - 2, size)]);
+            x[index(size - 1, 0, size)] = 0.5f * (x[index(size - 2, 0, size)] + x[index(size - 1, 1, size)]);
+            x[index(size - 1, size - 1, size)]
+                = 0.5f * (x[index(size - 2, size - 1, size)] + x[index(size - 1, size - 2, size)]);
+        }
+        // No boundary condition for corners is needed for Neumann or free surfaces
     }
 
     // Solve for scalar field for Poisson equation.
@@ -159,7 +184,13 @@ private:
     // The Laplacian operator describes the rate at which a scalar field changes over space (u -> f)
     // This function essentially computes the previous scalar field given the current one
     inline static void lin_solve(
-        int b, std::vector<float>& dest, const std::vector<float>& src, float a, float c, int size, int iter)
+        BoundaryType boundary_type,
+        std::vector<float>& dest,
+        const std::vector<float>& src,
+        float a,
+        float c,
+        int size,
+        int iter)
     {
         const float c_inv = 1.0f / c;
 
@@ -180,7 +211,7 @@ private:
 
                 dest[index(pos.x, pos.y, size)] = new_value;
             });
-            set_bnd(b, dest, size);
+            set_bnd(boundary_type, dest, size);
         }
     }
 
@@ -208,8 +239,8 @@ private:
             pressure[current] = 0;
         });
 
-        set_bnd(0, divergence, size);
-        set_bnd(0, pressure, size);
+        set_bnd(BoundaryType::none, divergence, size);
+        set_bnd(BoundaryType::none, pressure, size);
 
         // Scalar constant is used to scale the result of the Poisson equation before updating pressure
         const float scalar_constant = 1.5f;
@@ -219,7 +250,7 @@ private:
         const float discretization_constant = 6.0f;
 
         // Solve for pressure by solving the Poisson equation using the divergence of the velocity field as the source.
-        lin_solve(0, pressure, divergence, scalar_constant, discretization_constant, size, iter);
+        lin_solve(BoundaryType::none, pressure, divergence, scalar_constant, discretization_constant, size, iter);
     }
 
     inline static void correct_velocity(
@@ -235,12 +266,12 @@ private:
                 * static_cast<float>(size);
         });
 
-        set_bnd(1, vel_x, size);
-        set_bnd(2, vel_y, size);
+        set_bnd(BoundaryType::neumann, vel_x, size);
+        set_bnd(BoundaryType::neumann, vel_y, size);
     }
 
     inline static void advect(
-        int b,
+        BoundaryType boundary_type,
         const std::vector<float>& from,
         std::vector<float>& to,
         const std::vector<float>& vel_x,
@@ -279,11 +310,11 @@ private:
                 offset.x          * lerp(from[neighbors[1][0]], from[neighbors[1][1]], offset.y);
             // clang-format on
         });
-        set_bnd(b, to, size);
+        set_bnd(boundary_type, to, size);
     }
 
     inline static void diffuse(
-        int b,
+        BoundaryType boundary_type,
         const std::vector<float>& from,
         std::vector<float>& to,
         float diffusion_constant,
@@ -294,6 +325,6 @@ private:
         // Scaling factor for linear solving.
         // Higher value results in faster rate of diffusion.
         float a = time_step * diffusion_constant * (static_cast<float>(size) - 2) * (static_cast<float>(size) - 2);
-        lin_solve(b, to, from, a, 1 + 6 * a, size, iter);
+        lin_solve(boundary_type, to, from, a, 1 + 6 * a, size, iter);
     }
 };
