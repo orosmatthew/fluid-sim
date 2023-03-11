@@ -12,10 +12,11 @@ public:
     inline App()
         : m_window(640, 640, "Fluid Sim")
         , m_fixed_loop(60.0f)
-        , m_fluid(128, 0.0f, 0.0f, 4)
+        , m_fluid(256, 0.0f, 0.0f, 4)
         , m_prev_pos()
-        , m_image(128, 128, rl::Color::Black())
+        , m_image(256, 256, rl::Color::Black())
         , m_texture(m_image)
+        , m_scale(640.0f / 256.0f)
     {
     }
 
@@ -24,16 +25,16 @@ public:
         m_fixed_loop.update(5, [&]() {
             if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
                 rl::Vector2 pos = GetMousePosition();
-                pos /= 5.0f;
+                pos /= m_scale;
                 pos = pos.Clamp(
                     { 0.0f, 0.0f },
-                    { static_cast<float>(m_window.GetWidth()) / 5.0f - 1,
-                      static_cast<float>(m_window.GetHeight()) / 5.0f - 1 });
-                m_prev_pos /= 5.0f;
+                    { static_cast<float>(m_window.GetWidth()) / m_scale - 1,
+                      static_cast<float>(m_window.GetHeight()) / m_scale - 1 });
+                m_prev_pos /= m_scale;
                 m_prev_pos = m_prev_pos.Clamp(
                     { 0.0f, 0.0f },
-                    { static_cast<float>(m_window.GetWidth()) / 5.0f - 1,
-                      static_cast<float>(m_window.GetHeight()) / 5.0f - 1 });
+                    { static_cast<float>(m_window.GetWidth()) / m_scale - 1,
+                      static_cast<float>(m_window.GetHeight()) / m_scale - 1 });
                 float amount_x = pos.x - m_prev_pos.x;
                 float amount_y = pos.y - m_prev_pos.y;
                 m_fluid.add_density(static_cast<int>(pos.x), static_cast<int>(pos.y), 10000.0f);
@@ -42,26 +43,26 @@ public:
 
             if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
                 rl::Vector2 pos = GetMousePosition();
-                pos /= 5.0f;
+                pos /= m_scale;
                 pos = pos.Clamp(
                     { 0.0f, 0.0f },
-                    { static_cast<float>(m_window.GetWidth()) / 5.0f - 1,
-                      static_cast<float>(m_window.GetHeight()) / 5.0f - 1 });
+                    { static_cast<float>(m_window.GetWidth()) / m_scale - 1,
+                      static_cast<float>(m_window.GetHeight()) / m_scale - 1 });
                 m_fluid.add_density(static_cast<int>(pos.x), static_cast<int>(pos.y), -10000.0f);
             }
 
             if (IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
                 rl::Vector2 pos = GetMousePosition();
-                pos /= 5.0f;
+                pos /= m_scale;
                 pos = pos.Clamp(
                     { 0.0f, 0.0f },
-                    { static_cast<float>(m_window.GetWidth()) / 5.0f - 1,
-                      static_cast<float>(m_window.GetHeight()) / 5.0f - 1 });
-                m_prev_pos /= 5.0f;
+                    { static_cast<float>(m_window.GetWidth()) / m_scale - 1,
+                      static_cast<float>(m_window.GetHeight()) / m_scale - 1 });
+                m_prev_pos /= m_scale;
                 m_prev_pos = m_prev_pos.Clamp(
                     { 0.0f, 0.0f },
-                    { static_cast<float>(m_window.GetWidth()) / 5.0f - 1,
-                      static_cast<float>(m_window.GetHeight()) / 5.0f - 1 });
+                    { static_cast<float>(m_window.GetWidth()) / m_scale - 1,
+                      static_cast<float>(m_window.GetHeight()) / m_scale - 1 });
                 float amount_x = pos.x - m_prev_pos.x;
                 float amount_y = pos.y - m_prev_pos.y;
                 m_fluid.add_velocity(static_cast<int>(pos.x), static_cast<int>(pos.y), amount_x, amount_y);
@@ -86,26 +87,45 @@ public:
     }
 
 private:
+    struct Vector2i {
+        int x;
+        int y;
+    };
+
     rl::Window m_window;
+    BS::thread_pool m_thread_pool {};
     util::FixedLoop m_fixed_loop;
     Fluid m_fluid;
     rl::Vector2 m_prev_pos;
     rl::Image m_image;
     rl::Texture m_texture;
+    float m_scale;
+
+    inline static Vector2i index_to_pos(size_t index, int size)
+    {
+        return { .x = static_cast<int>(index % size), .y = static_cast<int>(index / size) };
+    }
 
     inline void draw_fluid()
     {
-        for (int i = 0; i < m_fluid.size(); i++) {
-            for (int j = 0; j < m_fluid.size(); j++) {
-                float d = m_fluid.density_at(i, j);
-                float c = map(d, 0.0f, 10000.0f, 0.0f, 255.0f);
-                c = std::clamp(c, 0.0f, 255.0f);
-                m_image.DrawPixel(
-                    i, j, rl::Color(static_cast<char>(c), static_cast<char>(c), static_cast<char>(c), 255));
-            }
-        }
+        m_thread_pool
+            .parallelize_loop(
+                m_fluid.size() * m_fluid.size(),
+                [&](int begin, int end) {
+                    for (int i = begin; i < end; i++) {
+                        Vector2i pos = index_to_pos(i, m_fluid.size());
+                        float d = m_fluid.density_at(pos.x, pos.y);
+                        float c = map(d, 0.0f, 10000.0f, 0.0f, 255.0f);
+                        c = std::clamp(c, 0.0f, 255.0f);
+                        m_image.DrawPixel(
+                            pos.x,
+                            pos.y,
+                            rl::Color(static_cast<char>(c), static_cast<char>(c), static_cast<char>(c), 255));
+                    }
+                })
+            .wait();
         m_texture.Update(m_image.data);
-        m_texture.Draw(rl::Vector2(0, 0), 0.0f, 5.0f);
+        m_texture.Draw(rl::Vector2(0, 0), 0.0f, m_scale);
     }
 
     inline static float map(float value, float in_min, float in_max, float out_min, float out_max)

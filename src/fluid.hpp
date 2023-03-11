@@ -5,6 +5,8 @@
 #include <functional>
 #include <vector>
 
+#include <BS_thread_pool.hpp>
+
 class Fluid {
 public:
     inline Fluid(int size, float diffusion, float viscosity, int iter)
@@ -31,6 +33,8 @@ public:
         m_pressure = empty;
         m_divergence = empty;
 
+        m_tmp = empty;
+
         m_lin_solve_iterations = iter;
     }
 
@@ -40,20 +44,56 @@ public:
             m_density[i] = std::clamp(m_density[i], 0.0f, 10000.0f);
         }
 
-        diffuse(BoundaryType::neumann, m_vel_x, m_vel_x_next, m_viscosity, time_step, m_size, m_lin_solve_iterations);
-        diffuse(BoundaryType::neumann, m_vel_y, m_vel_y_next, m_viscosity, time_step, m_size, m_lin_solve_iterations);
+        /*
+         * Input:
+         * m_vel_x
+         * m_vel_y
+         */
 
-        calc_pressure(m_vel_x_next, m_vel_y_next, m_pressure, m_divergence, m_size, m_lin_solve_iterations);
-        correct_velocity(m_vel_x_next, m_vel_y_next, m_pressure, m_size);
+        diffuse(
+            BoundaryType::neumann,
+            m_thread_pool,
+            m_vel_x,
+            m_vel_x_next,
+            m_tmp,
+            m_viscosity,
+            time_step,
+            m_size,
+            m_lin_solve_iterations);
+        diffuse(
+            BoundaryType::neumann,
+            m_thread_pool,
+            m_vel_y,
+            m_vel_y_next,
+            m_tmp,
+            m_viscosity,
+            time_step,
+            m_size,
+            m_lin_solve_iterations);
 
-        advect(BoundaryType::neumann, m_vel_x_next, m_vel_x, m_vel_x_next, m_vel_y_next, time_step, m_size);
-        advect(BoundaryType::neumann, m_vel_y_next, m_vel_y, m_vel_x_next, m_vel_y_next, time_step, m_size);
+        calc_pressure(
+            m_thread_pool, m_vel_x_next, m_vel_y_next, m_pressure, m_divergence, m_tmp, m_size, m_lin_solve_iterations);
+        correct_velocity(m_thread_pool, m_vel_x_next, m_vel_y_next, m_pressure, m_size);
 
-        calc_pressure(m_vel_x, m_vel_y, m_pressure, m_divergence, m_size, m_lin_solve_iterations);
-        correct_velocity(m_vel_x, m_vel_y, m_pressure, m_size);
+        advect(
+            m_thread_pool, BoundaryType::neumann, m_vel_x_next, m_vel_x, m_vel_x_next, m_vel_y_next, time_step, m_size);
+        advect(
+            m_thread_pool, BoundaryType::neumann, m_vel_y_next, m_vel_y, m_vel_x_next, m_vel_y_next, time_step, m_size);
 
-        diffuse(BoundaryType::fixed, m_density, m_s, m_diff, time_step, m_size, m_lin_solve_iterations);
-        advect(BoundaryType::fixed, m_s, m_density, m_vel_x, m_vel_y, time_step, m_size);
+        calc_pressure(m_thread_pool, m_vel_x, m_vel_y, m_pressure, m_divergence, m_tmp, m_size, m_lin_solve_iterations);
+        correct_velocity(m_thread_pool, m_vel_x, m_vel_y, m_pressure, m_size);
+
+        diffuse(
+            BoundaryType::fixed,
+            m_thread_pool,
+            m_density,
+            m_s,
+            m_tmp,
+            m_diff,
+            time_step,
+            m_size,
+            m_lin_solve_iterations);
+        advect(m_thread_pool, BoundaryType::fixed, m_s, m_density, m_vel_x, m_vel_y, time_step, m_size);
 
         for (size_t i = 0; i < m_size * m_size; i++) {
             m_density[i] = std::clamp(m_density[i], 0.0f, 10000.0f);
@@ -102,6 +142,8 @@ private:
     float m_diff;
     float m_viscosity;
 
+    BS::thread_pool m_thread_pool {};
+
     std::vector<float> m_s;
     std::vector<float> m_density;
 
@@ -113,6 +155,8 @@ private:
 
     std::vector<float> m_pressure;
     std::vector<float> m_divergence;
+
+    std::vector<float> m_tmp;
 
     int m_lin_solve_iterations;
 
@@ -133,6 +177,11 @@ private:
     inline static size_t index(int x, int y, int size)
     {
         return static_cast<size_t>(x) + static_cast<size_t>(y) * size;
+    }
+
+    inline static Vector2i index_to_pos(size_t index, int size)
+    {
+        return { .x = static_cast<int>(index % size), .y = static_cast<int>(index / size) };
     }
 
     enum class BoundaryType {
@@ -182,44 +231,37 @@ private:
     // L^2*u=f
     // L^2 = Laplacian operator; u = scalar field (dest); f = scalar field (src)
     // The Laplacian operator describes the rate at which a scalar field changes over space (u -> f)
-    // This function essentially computes the previous scalar field given the current one
-    inline static void lin_solve(
-        BoundaryType boundary_type,
-        std::vector<float>& dest,
+    // This function essentially computes the previous scalar field given the current one.
+    // This function only computes the dest value at a single point but will read from adjacent points around.
+    // In dest vector:
+    //      adj
+    //  adj pos adj
+    //      adj
+    inline static void linear_solve_point(
+        size_t index,
+        std::vector<float>& out,
+        const std::vector<float>& dest,
         const std::vector<float>& src,
         float a,
-        float c,
-        int size,
-        int iter)
+        float c_inv,
+        int size)
     {
-        const float c_inv = 1.0f / c;
 
-        for (int t = 0; t < iter; t++) {
-            for_2d({ 1, 1 }, { size - 1, size - 1 }, [&](const Vector2i& pos) {
-                // clang-format off
-                float neighbor_sum =
-                    dest[index(pos.x + 1, pos.y, size)] +
-                    dest[index(pos.x - 1, pos.y, size)] +
-                    dest[index(pos.x, pos.y + 1, size)] +
-                    dest[index(pos.x, pos.y - 1, size)];
-                // clang-format on
+        float neighbor_sum = dest[index + 1] + dest[index - 1] + dest[index + size] + dest[index - size];
 
-                // Contribution of the laplacian operator to the new value of the current point
-                float laplacian_contribution = a * neighbor_sum;
+        // Contribution of the laplacian operator to the new value of the current point
+        float laplacian_contribution = a * neighbor_sum;
 
-                float new_value = (src[index(pos.x, pos.y, size)] + laplacian_contribution) * c_inv;
-
-                dest[index(pos.x, pos.y, size)] = new_value;
-            });
-            set_bnd(boundary_type, dest, size);
-        }
+        out[index] = (src[index] + laplacian_contribution) * c_inv;
     }
 
     inline static void calc_pressure(
+        BS::thread_pool& thread_pool,
         const std::vector<float>& vel_x,
         const std::vector<float>& vel_y,
         std::vector<float>& pressure,
         std::vector<float>& divergence,
+        std::vector<float>& tmp,
         int size,
         int iter)
     {
@@ -231,13 +273,19 @@ private:
         // (0) not accumulating nor depleting
         // This is used to compute the pressure field which helps to correct for numerical errors by conserving
         // mass, momentum and energy.
-        for_2d({ 1, 1 }, { size - 1, size - 1 }, [&](const Vector2i pos) {
-            const float delta_x = vel_x[index(pos.x + 1, pos.y, size)] - vel_x[index(pos.x - 1, pos.y, size)];
-            const float delta_y = vel_y[index(pos.x, pos.y + 1, size)] - vel_y[index(pos.x, pos.y - 1, size)];
-            const size_t current = index(pos.x, pos.y, size);
-            divergence[current] = -0.5f * (delta_x + delta_y) / static_cast<float>(size);
-            pressure[current] = 0;
-        });
+        thread_pool
+            .parallelize_loop(
+                (size - 2) * (size - 2),
+                [&](int begin, int end) {
+                    for (int i = begin; i < end; i++) {
+                        size_t index = i + size + 1;
+                        const float delta_x = vel_x[index + 1] - vel_x[index - 1];
+                        const float delta_y = vel_y[index + size] - vel_y[index - size];
+                        divergence[index] = -0.5f * (delta_x + delta_y) / static_cast<float>(size);
+                        pressure[index] = 0;
+                    }
+                })
+            .wait();
 
         set_bnd(BoundaryType::none, divergence, size);
         set_bnd(BoundaryType::none, pressure, size);
@@ -250,27 +298,53 @@ private:
         const float discretization_constant = 6.0f;
 
         // Solve for pressure by solving the Poisson equation using the divergence of the velocity field as the source.
-        lin_solve(BoundaryType::none, pressure, divergence, scalar_constant, discretization_constant, size, iter);
+        const float c_inv = 1.0f / discretization_constant;
+        std::fill(tmp.begin(), tmp.end(), 0.0f);
+        for (int t = 0; t < iter; t++) {
+
+            thread_pool
+                .parallelize_loop(
+                    (size - 2) * (size - 2),
+                    [&](int begin, int end) {
+                        for (int i = begin; i < end; i++) {
+                            int index = i + size + 1;
+                            linear_solve_point(index, tmp, pressure, divergence, scalar_constant, c_inv, size);
+                        }
+                    })
+                .wait();
+            std::swap(pressure, tmp);
+            set_bnd(BoundaryType::none, pressure, size);
+        }
     }
 
     inline static void correct_velocity(
-        std::vector<float>& vel_x, std::vector<float>& vel_y, const std::vector<float>& pressure, int size)
+        BS::thread_pool& thread_pool,
+        std::vector<float>& vel_x,
+        std::vector<float>& vel_y,
+        const std::vector<float>& pressure,
+        int size)
     {
         // Subtract the pressure gradient from the velocity field to ensure incompressibility
         // This ensures that the velocity field remains divergence-free
-        for_2d({ 1, 1 }, { size - 1, size - 1 }, [&](const Vector2i& pos) {
-            const size_t current = index(pos.x, pos.y, size);
-            vel_x[current] -= 0.5f * (pressure[index(pos.x + 1, pos.y, size)] - pressure[index(pos.x - 1, pos.y, size)])
-                * static_cast<float>(size);
-            vel_y[current] -= 0.5f * (pressure[index(pos.x, pos.y + 1, size)] - pressure[index(pos.x, pos.y - 1, size)])
-                * static_cast<float>(size);
-        });
+        thread_pool
+            .parallelize_loop(
+                (size - 2) * (size - 2),
+                [&](int begin, int end) {
+                    for (int i = begin; i < end; i++) {
+                        size_t index = i + size + 1;
+                        vel_x[index] -= 0.5f * (pressure[index + 1] - pressure[index - 1]) * static_cast<float>(size);
+                        vel_y[index]
+                            -= 0.5f * (pressure[index + size] - pressure[index - size]) * static_cast<float>(size);
+                    }
+                })
+            .wait();
 
         set_bnd(BoundaryType::neumann, vel_x, size);
         set_bnd(BoundaryType::neumann, vel_y, size);
     }
 
     inline static void advect(
+        BS::thread_pool& thread_pool,
         BoundaryType boundary_type,
         const std::vector<float>& from,
         std::vector<float>& to,
@@ -281,42 +355,50 @@ private:
     {
         Vector2 dt { time_step * static_cast<float>(size) - 2, time_step * static_cast<float>(size) - 2 };
 
-        for_2d({ 1, 1 }, { size - 1, size - 1 }, [&](const Vector2i& pos) {
-            // Index of current pos
-            const size_t current = index(pos.x, pos.y, size);
-            // displacement = dt * vel
-            const Vector2 displacement { dt.x * vel_x[current], dt.y * vel_y[current] };
-            // new_pos = pos - displacement
-            Vector2 new_pos { static_cast<float>(pos.x) - displacement.x, static_cast<float>(pos.y) - displacement.y };
-            // Clamp new position to size
-            new_pos.x = std::clamp(new_pos.x, 0.5f, static_cast<float>(size) - 2 + 0.5f);
-            new_pos.y = std::clamp(new_pos.y, 0.5f, static_cast<float>(size) - 2 + 0.5f);
-            // new_pos_i = int(floor(new_pos))
-            const Vector2i new_pos_i { static_cast<int>(floorf(new_pos.x)), static_cast<int>(floorf(new_pos.y)) };
-            // offset = new_pos - new_pos_i
-            const Vector2 offset { new_pos.x - static_cast<float>(new_pos_i.x),
-                                   new_pos.y - static_cast<float>(new_pos_i.y) };
+        thread_pool
+            .parallelize_loop(
+                (size - 2) * (size - 2),
+                [&](int begin, int end) {
+                    for (int i = begin; i < end; i++) {
+                        // Index of current pos
+                        const size_t current = i + size + 1;
+                        const Vector2i pos = index_to_pos(current, size);
+                        // displacement = dt * vel
+                        const Vector2 displacement { dt.x * vel_x[current], dt.y * vel_y[current] };
+                        // new_pos = pos - displacement
+                        Vector2 new_pos { static_cast<float>(pos.x) - displacement.x,
+                                          static_cast<float>(pos.y) - displacement.y };
+                        // Clamp new position to size
+                        new_pos.x = std::clamp(new_pos.x, 0.5f, static_cast<float>(size) - 2 + 0.5f);
+                        new_pos.y = std::clamp(new_pos.y, 0.5f, static_cast<float>(size) - 2 + 0.5f);
+                        // new_pos_i = int(floor(new_pos))
+                        const Vector2i new_pos_i { static_cast<int>(floorf(new_pos.x)),
+                                                   static_cast<int>(floorf(new_pos.y)) };
+                        // offset = new_pos - new_pos_i
+                        const Vector2 offset { new_pos.x - static_cast<float>(new_pos_i.x),
+                                               new_pos.y - static_cast<float>(new_pos_i.y) };
 
-            // clang-format off
-            // Neighboring indices of points in the direction of the displacement/velocity
-            const size_t neighbors[2][2] = {
-                {index(new_pos_i.x,     new_pos_i.y, size), index(new_pos_i.x,     new_pos_i.y + 1, size)},
-                {index(new_pos_i.x + 1, new_pos_i.y, size), index(new_pos_i.x + 1, new_pos_i.y + 1, size)}
-            };
+                        // Neighboring indices of points in the direction of the displacement/velocity
+                        const size_t neighbors[2][2] = {
+                            { index(new_pos_i.x, new_pos_i.y, size), index(new_pos_i.x, new_pos_i.y + 1, size) },
+                            { index(new_pos_i.x + 1, new_pos_i.y, size), index(new_pos_i.x + 1, new_pos_i.y + 1, size) }
+                        };
 
-            // Perform bilinear interpolation between neighbors
-            to[current] =
-                (1.0f - offset.x) * lerp(from[neighbors[0][0]], from[neighbors[0][1]], offset.y) +
-                offset.x          * lerp(from[neighbors[1][0]], from[neighbors[1][1]], offset.y);
-            // clang-format on
-        });
+                        // Perform bilinear interpolation between neighbors
+                        to[current] = (1.0f - offset.x) * lerp(from[neighbors[0][0]], from[neighbors[0][1]], offset.y)
+                            + offset.x * lerp(from[neighbors[1][0]], from[neighbors[1][1]], offset.y);
+                    }
+                })
+            .wait();
         set_bnd(boundary_type, to, size);
     }
 
     inline static void diffuse(
         BoundaryType boundary_type,
+        BS::thread_pool& thread_pool,
         const std::vector<float>& from,
         std::vector<float>& to,
+        std::vector<float>& tmp,
         float diffusion_constant,
         float time_step,
         int size,
@@ -324,7 +406,23 @@ private:
     {
         // Scaling factor for linear solving.
         // Higher value results in faster rate of diffusion.
-        float a = time_step * diffusion_constant * (static_cast<float>(size) - 2) * (static_cast<float>(size) - 2);
-        lin_solve(boundary_type, to, from, a, 1 + 6 * a, size, iter);
+        const float a
+            = time_step * diffusion_constant * (static_cast<float>(size) - 2) * (static_cast<float>(size) - 2);
+        const float c_inv = 1.0f / (1 + 6 * a);
+        std::fill(tmp.begin(), tmp.end(), 0.0f);
+        for (int t = 0; t < iter; t++) {
+
+            thread_pool
+                .parallelize_loop(
+                    (size - 2) * (size - 2),
+                    [&](int begin, int end) {
+                        for (int current = begin; current < end; current++) {
+                            linear_solve_point(current + size + 1, tmp, to, from, a, c_inv, size);
+                        }
+                    })
+                .wait();
+            std::swap(to, tmp);
+            set_bnd(boundary_type, to, size);
+        }
     }
 };
