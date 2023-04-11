@@ -10,13 +10,13 @@ namespace rl = raylib;
 class App {
 public:
     inline App()
-        : m_window(640, 640, "Fluid Sim")
+        : m_window(1200, 1200, "Fluid Sim")
         , m_fixed_loop(60.0f)
-        , m_fluid(256, 0.0f, 0.0f, 4)
+        , m_fluid(512, 0.0f, 0.0f, 4)
         , m_prev_pos()
-        , m_image(256, 256, rl::Color::Black())
+        , m_image(512, 512, rl::Color::Black())
         , m_texture(m_image)
-        , m_scale(640.0f / 256.0f)
+        , m_scale(1200.0f / 512.0f)
     {
     }
 
@@ -117,10 +117,7 @@ private:
                         float d = m_fluid.density_at(pos.x, pos.y);
                         float c = map(d, 0.0f, 10000.0f, 0.0f, 255.0f);
                         c = std::clamp(c, 0.0f, 255.0f);
-                        m_image.DrawPixel(
-                            pos.x,
-                            pos.y,
-                            rl::Color(static_cast<char>(c), static_cast<char>(c), static_cast<char>(c), 255));
+                        m_image.DrawPixel(pos.x, pos.y, rl::Color(0, static_cast<char>(c), static_cast<char>(c), 255));
                     }
                 })
             .wait();

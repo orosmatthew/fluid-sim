@@ -237,14 +237,8 @@ private:
     //      adj
     //  adj pos adj
     //      adj
-    inline static void linear_solve_point(
-        size_t index,
-        std::vector<float>& out,
-        const std::vector<float>& dest,
-        const std::vector<float>& src,
-        float a,
-        float c_inv,
-        int size)
+    inline static float linear_solve_point(
+        size_t index, const std::vector<float>& dest, const std::vector<float>& src, float a, float c_inv, int size)
     {
 
         float neighbor_sum = dest[index + 1] + dest[index - 1] + dest[index + size] + dest[index - size];
@@ -252,7 +246,7 @@ private:
         // Contribution of the laplacian operator to the new value of the current point
         float laplacian_contribution = a * neighbor_sum;
 
-        out[index] = (src[index] + laplacian_contribution) * c_inv;
+        return (src[index] + laplacian_contribution) * c_inv;
     }
 
     inline static void calc_pressure(
@@ -308,7 +302,7 @@ private:
                     [&](int begin, int end) {
                         for (int i = begin; i < end; i++) {
                             int index = i + size + 1;
-                            linear_solve_point(index, tmp, pressure, divergence, scalar_constant, c_inv, size);
+                            tmp[index] = linear_solve_point(index, pressure, divergence, scalar_constant, c_inv, size);
                         }
                     })
                 .wait();
@@ -353,7 +347,7 @@ private:
         float time_step,
         int size)
     {
-        Vector2 dt { time_step * static_cast<float>(size) - 2, time_step * static_cast<float>(size) - 2 };
+        Vector2 dt { time_step * (static_cast<float>(size) - 2), time_step * (static_cast<float>(size) - 2) };
 
         thread_pool
             .parallelize_loop(
@@ -408,16 +402,15 @@ private:
         // Higher value results in faster rate of diffusion.
         const float a
             = time_step * diffusion_constant * (static_cast<float>(size) - 2) * (static_cast<float>(size) - 2);
-        const float c_inv = 1.0f / (1 + 6 * a);
+        const float c_inv = 1.0f / (1 + 4 * a);
         std::fill(tmp.begin(), tmp.end(), 0.0f);
         for (int t = 0; t < iter; t++) {
-
             thread_pool
                 .parallelize_loop(
                     (size - 2) * (size - 2),
                     [&](int begin, int end) {
                         for (int current = begin; current < end; current++) {
-                            linear_solve_point(current + size + 1, tmp, to, from, a, c_inv, size);
+                            tmp[current + size + 1] = linear_solve_point(current + size + 1, to, from, a, c_inv, size);
                         }
                     })
                 .wait();
