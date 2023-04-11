@@ -56,6 +56,7 @@ set(SOURCE_FILES
         src/logger.cpp
         src/camera.cpp
         src/util/fixed_loop.cpp
+        src/text_pipeline.cpp
         )
 
 set(LIBS
@@ -88,5 +89,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${LIB_INCLUDES})
 
 add_shaders(fluid_sim_3d
         cloud.frag
-        cloud.vert)
+        cloud.vert
+        text.frag
+        text.vert)
 

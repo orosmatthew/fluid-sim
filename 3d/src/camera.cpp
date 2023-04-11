@@ -5,7 +5,7 @@ Camera::Camera()
     , m_prev_pos(mve::Vector3(0, 0, 0))
     , m_friction(0.3f)
     , m_acceleration(0.015f)
-    , m_max_speed(0.2f)
+    , m_max_speed(0.1f)
 {
 }
 void Camera::update(const mve::Window& window)
@@ -57,13 +57,7 @@ void Camera::fixed_update(const mve::Window& window)
     dir = dir.rotate(m_body_transform.basis().transpose());
     m_velocity -= (m_velocity * m_friction) * 0.35f;
 
-    if (window.is_key_down(mve::Key::left_control)) {
-        m_velocity += dir.normalize() * m_acceleration * mve::clamp((30.0f - m_velocity.length()), 0.0f, 1.0f) * 10.0f;
-    }
-    else {
-        m_velocity
-            += dir.normalize() * m_acceleration * mve::clamp((m_max_speed - m_velocity.length()), 0.0f, 1.0f) * 1.5f;
-    }
+    m_velocity += dir.normalize() * m_acceleration * mve::clamp((m_max_speed - m_velocity.length()), 0.0f, 1.0f) * 1.5f;
 
     m_body_transform = m_body_transform.translate(m_velocity);
 }

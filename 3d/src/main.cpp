@@ -1,3 +1,4 @@
+#include <chrono>
 #include <iostream>
 
 #include <FastNoiseLite.h>
@@ -12,6 +13,8 @@
 #include "camera.hpp"
 #include "fluid.hpp"
 #include "logger.hpp"
+#include "text_buffer.hpp"
+#include "text_pipeline.hpp"
 #include "util/fixed_loop.hpp"
 
 int main()
@@ -108,14 +111,22 @@ int main()
 
     util::FixedLoop fixed_loop(60.0f);
 
+    TextPipeline text_pipeline(renderer, 36);
+    TextBuffer fps_text = text_pipeline.create_text_buffer("FPS:", { 0, 0 }, 1.0f, { 1.0f, 1.0f, 1.0f });
+
     window.set_resize_callback([&](mve::Vector2i new_size) {
         renderer.resize(window);
+        text_pipeline.resize();
         mve::Matrix4 proj = mve::perspective(90.0f, (float)new_size.x / (float)new_size.y, 0.001f, 100.0f);
         global_ubo.update(vert_shader.descriptor_set(0).binding(0).member("proj").location(), proj);
     });
+    text_pipeline.resize();
 
     window.disable_cursor();
     bool cursor_captured = true;
+    int current_frame_count = 0;
+    int frame_count = 0;
+    auto begin_time = std::chrono::steady_clock::time_point();
     while (!window.should_close()) {
         window.poll_events();
 
@@ -153,7 +164,19 @@ int main()
         renderer.bind_vertex_buffer(vertex_buffer);
         renderer.draw_index_buffer(index_buffer);
 
+        text_pipeline.draw(fps_text);
+
         renderer.end_render_pass_present();
         renderer.end_frame(window);
+
+        std::chrono::high_resolution_clock::time_point end_time = std::chrono::high_resolution_clock::now();
+
+        if (std::chrono::duration_cast<std::chrono::microseconds>(end_time - begin_time).count() >= 1000000) {
+            begin_time = std::chrono::high_resolution_clock::now();
+            frame_count = current_frame_count;
+            fps_text.update("FPS:" + std::to_string(frame_count));
+            current_frame_count = 0;
+        }
+        current_frame_count++;
     }
 }
