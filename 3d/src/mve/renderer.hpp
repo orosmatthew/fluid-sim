@@ -164,7 +164,8 @@ public:
      */
     Texture create_texture(const std::filesystem::path& path);
 
-    Texture create_texture(TextureFormat format, uint32_t width, uint32_t height, const std::byte* data);
+    Texture create_texture(
+        TextureFormat format, uint32_t width, uint32_t height, uint32_t depth, const std::byte* data);
 
     /**
      * @brief Create graphics pipeline from shaders and vertex layout
@@ -605,6 +606,7 @@ private:
         VmaAllocator allocator,
         uint32_t width,
         uint32_t height,
+        uint32_t depth,
         uint32_t mip_levels,
         vk::SampleCountFlagBits samples,
         vk::Format format,
@@ -636,6 +638,7 @@ private:
         vk::Format format,
         uint32_t width,
         uint32_t height,
+        uint32_t depth,
         uint32_t mip_levels);
 
     static vk::CommandBuffer begin_single_submit(
@@ -663,7 +666,8 @@ private:
         vk::Buffer buffer,
         vk::Image image,
         uint32_t width,
-        uint32_t height);
+        uint32_t height,
+        uint32_t depth);
 
     static vk::Sampler create_texture_sampler(
         const vk::DispatchLoaderDynamic& loader,
@@ -677,6 +681,7 @@ private:
         vk::Image image,
         vk::Format format,
         vk::ImageAspectFlags aspect_flags,
+        vk::ImageViewType view_type,
         uint32_t mip_levels);
 
     static VKAPI_ATTR VkBool32 VKAPI_CALL vk_debug_callback(

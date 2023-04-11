@@ -54,6 +54,8 @@ set(SOURCE_FILES
         src/mve/vertex_data.cpp
         src/mve/window.cpp
         src/logger.cpp
+        src/camera.cpp
+        src/util/fixed_loop.cpp
         )
 
 set(LIBS
@@ -67,7 +69,8 @@ set(LIB_INCLUDES
         lib/stb-8b5f1f3/include
         lib/tinyobjloader-45f683c/include
         lib/spirv-reflect-1.3.236/include
-        lib/thread-pool-3.3.0/include)
+        lib/thread-pool-3.3.0/include
+        lib/fast-noise-lite-1.0.3/include)
 
 add_executable(${PROJECT_NAME})
 

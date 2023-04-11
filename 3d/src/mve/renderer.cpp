@@ -499,7 +499,14 @@ std::vector<vk::ImageView> Renderer::create_vk_swapchain_image_views(
         swapchain_images.cend(),
         std::back_inserter(image_views),
         [&](vk::Image swapchain_image) {
-            return create_image_view(loader, device, swapchain_image, image_format, vk::ImageAspectFlagBits::eColor, 1);
+            return create_image_view(
+                loader,
+                device,
+                swapchain_image,
+                image_format,
+                vk::ImageAspectFlagBits::eColor,
+                vk::ImageViewType::e2D,
+                1);
         });
 
     return image_views;
@@ -1858,7 +1865,8 @@ void Renderer::cmd_copy_buffer_to_image(
     vk::Buffer buffer,
     vk::Image image,
     uint32_t width,
-    uint32_t height)
+    uint32_t height,
+    uint32_t depth)
 {
     auto region
         = vk::BufferImageCopy()
@@ -1871,7 +1879,7 @@ void Renderer::cmd_copy_buffer_to_image(
                                        .setBaseArrayLayer(0)
                                        .setLayerCount(1))
               .setImageOffset(vk::Offset3D(0, 0, 0))
-              .setImageExtent(vk::Extent3D(width, height, 1));
+              .setImageExtent(vk::Extent3D(width, height, depth));
 
     command_buffer.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, 1, &region, loader);
 }
@@ -1882,6 +1890,7 @@ vk::ImageView Renderer::create_image_view(
     vk::Image image,
     vk::Format format,
     vk::ImageAspectFlags aspect_flags,
+    vk::ImageViewType view_type,
     uint32_t mip_levels)
 {
     auto components
@@ -1902,7 +1911,7 @@ vk::ImageView Renderer::create_image_view(
     auto view_info
         = vk::ImageViewCreateInfo()
               .setImage(image)
-              .setViewType(vk::ImageViewType::e2D)
+              .setViewType(view_type)
               .setFormat(format)
               .setComponents(components)
               .setSubresourceRange(image_subresource_range);
@@ -1957,14 +1966,21 @@ Renderer::DepthImage Renderer::create_depth_image(
         extent.width,
         extent.height,
         1,
+        1,
         samples,
         depth_format,
         vk::ImageTiling::eOptimal,
         vk::ImageUsageFlagBits::eDepthStencilAttachment,
         true);
 
-    vk::ImageView depth_image_view
-        = create_image_view(loader, device, depth_image.vk_handle, depth_format, vk::ImageAspectFlagBits::eDepth, 1);
+    vk::ImageView depth_image_view = create_image_view(
+        loader,
+        device,
+        depth_image.vk_handle,
+        depth_format,
+        vk::ImageAspectFlagBits::eDepth,
+        vk::ImageViewType::e2D,
+        1);
 
     vk::CommandBuffer command_buffer = begin_single_submit(loader, device, pool);
 
@@ -2022,6 +2038,7 @@ Renderer::Image Renderer::create_image(
     VmaAllocator allocator,
     uint32_t width,
     uint32_t height,
+    uint32_t depth,
     uint32_t mip_levels,
     vk::SampleCountFlagBits samples,
     vk::Format format,
@@ -2031,10 +2048,10 @@ Renderer::Image Renderer::create_image(
 {
     VkImageCreateInfo image_info = {};
     image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.imageType = depth == 1 ? VK_IMAGE_TYPE_2D : VK_IMAGE_TYPE_3D;
     image_info.extent.width = width;
     image_info.extent.height = height;
-    image_info.extent.depth = 1;
+    image_info.extent.depth = depth;
     image_info.mipLevels = mip_levels;
     image_info.arrayLayers = 1;
     image_info.format = static_cast<VkFormat>(format);
@@ -2064,6 +2081,7 @@ void Renderer::cmd_generate_mipmaps(
     vk::Format format,
     uint32_t width,
     uint32_t height,
+    uint32_t depth,
     uint32_t mip_levels)
 {
     // Check image format supports linear blitting
@@ -2087,6 +2105,7 @@ void Renderer::cmd_generate_mipmaps(
 
     uint32_t mip_width = width;
     uint32_t mip_height = height;
+    uint32_t mip_depth = depth;
 
     for (uint32_t i = 1; i < mip_levels; i++) {
         barrier.subresourceRange.setBaseMipLevel(i - 1);
@@ -2106,7 +2125,8 @@ void Renderer::cmd_generate_mipmaps(
             1,
             &barrier);
 
-        std::array<vk::Offset3D, 2> src_offsets = { vk::Offset3D(0, 0, 0), vk::Offset3D(mip_width, mip_height, 1) };
+        std::array<vk::Offset3D, 2> src_offsets
+            = { vk::Offset3D(0, 0, 0), vk::Offset3D(mip_width, mip_height, mip_depth) };
 
         auto src_subresource
             = vk::ImageSubresourceLayers()
@@ -2117,7 +2137,10 @@ void Renderer::cmd_generate_mipmaps(
 
         std::array<vk::Offset3D, 2> dst_offsets
             = { vk::Offset3D(0, 0, 0),
-                vk::Offset3D(mip_width > 1 ? mip_width / 2 : 1, mip_height > 1 ? mip_height / 2 : 1, 1) };
+                vk::Offset3D(
+                    mip_width > 1 ? mip_width / 2 : 1,
+                    mip_height > 1 ? mip_height / 2 : 1,
+                    mip_depth > 1 ? mip_depth / 2 : 1) };
 
         auto dst_subresource
             = vk::ImageSubresourceLayers()
@@ -2162,6 +2185,9 @@ void Renderer::cmd_generate_mipmaps(
         }
         if (mip_height > 1) {
             mip_height /= 2;
+        }
+        if (mip_depth > 1) {
+            mip_depth /= 2;
         }
     }
 
@@ -2227,6 +2253,7 @@ Renderer::RenderImage Renderer::create_color_image(
         swapchain_extent.width,
         swapchain_extent.height,
         1,
+        1,
         samples,
         swapchain_format,
         vk::ImageTiling::eOptimal,
@@ -2234,7 +2261,13 @@ Renderer::RenderImage Renderer::create_color_image(
         true); // TODO: make the sampled optional
 
     vk::ImageView image_view = create_image_view(
-        loader, device, color_image.vk_handle, swapchain_format, vk::ImageAspectFlagBits::eColor, 1);
+        loader,
+        device,
+        color_image.vk_handle,
+        swapchain_format,
+        vk::ImageAspectFlagBits::eColor,
+        vk::ImageViewType::e2D,
+        1);
 
     return { color_image, image_view };
 }
@@ -2490,10 +2523,10 @@ DescriptorSet Renderer::create_descriptor_set(
 
 void Renderer::bind_graphics_pipeline(const GraphicsPipeline& graphics_pipeline)
 {
-//    if (m_current_draw_state.current_pipeline == graphics_pipeline.handle()) {
-//        LOG->info("HERE!");
-//        return;
-//    }
+    //    if (m_current_draw_state.current_pipeline == graphics_pipeline.handle()) {
+    //        LOG->info("HERE!");
+    //        return;
+    //    }
     m_current_draw_state.command_buffer.bindPipeline(
         vk::PipelineBindPoint::eGraphics,
         m_graphics_pipelines_new.at(graphics_pipeline.handle())->pipeline,
@@ -2604,13 +2637,14 @@ void Renderer::destroy(Texture& texture)
 }
 
 // TODO: mip-mapping
-Texture Renderer::create_texture(TextureFormat format, uint32_t width, uint32_t height, const std::byte* data)
+Texture Renderer::create_texture(
+    TextureFormat format, uint32_t width, uint32_t height, uint32_t depth, const std::byte* data)
 {
     MVE_VAL_ASSERT(width != 0 && height != 0, "[Renderer] Attempt to create texture with 0 width or height")
     uint32_t mip_levels = 1;
 
     vk::Format vk_format;
-    size_t size = width * height * sizeof(std::byte);
+    size_t size = width * height * depth * sizeof(std::byte);
     switch (format) {
     case TextureFormat::r:
         vk_format = vk::Format::eR8Unorm;
@@ -2645,6 +2679,7 @@ Texture Renderer::create_texture(TextureFormat format, uint32_t width, uint32_t 
         m_vma_allocator,
         width,
         height,
+        depth,
         mip_levels,
         vk::SampleCountFlagBits::e1,
         vk_format,
@@ -2652,29 +2687,44 @@ Texture Renderer::create_texture(TextureFormat format, uint32_t width, uint32_t 
         vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
         false);
 
-    defer_to_command_buffer_front([this, image, mip_levels, staging_buffer, width, height, vk_format](
-                                      vk::CommandBuffer command_buffer) {
-        cmd_transition_image_layout(
-            m_vk_loader,
-            command_buffer,
-            image.vk_handle,
-            vk_format,
-            vk::ImageLayout::eUndefined,
-            vk::ImageLayout::eTransferDstOptimal,
-            mip_levels);
+    defer_to_command_buffer_front(
+        [this, image, mip_levels, staging_buffer, width, height, depth, vk_format](vk::CommandBuffer command_buffer) {
+            cmd_transition_image_layout(
+                m_vk_loader,
+                command_buffer,
+                image.vk_handle,
+                vk_format,
+                vk::ImageLayout::eUndefined,
+                vk::ImageLayout::eTransferDstOptimal,
+                mip_levels);
 
-        cmd_copy_buffer_to_image(m_vk_loader, command_buffer, staging_buffer.vk_handle, image.vk_handle, width, height);
+            cmd_copy_buffer_to_image(
+                m_vk_loader, command_buffer, staging_buffer.vk_handle, image.vk_handle, width, height, depth);
 
-        cmd_generate_mipmaps(
-            m_vk_loader, m_vk_physical_device, command_buffer, image.vk_handle, vk_format, width, height, mip_levels);
+            cmd_generate_mipmaps(
+                m_vk_loader,
+                m_vk_physical_device,
+                command_buffer,
+                image.vk_handle,
+                vk_format,
+                width,
+                height,
+                depth,
+                mip_levels);
 
-        defer_to_next_frame([this, staging_buffer](uint32_t) {
-            vmaDestroyBuffer(m_vma_allocator, staging_buffer.vk_handle, staging_buffer.vma_allocation);
+            defer_to_next_frame([this, staging_buffer](uint32_t) {
+                vmaDestroyBuffer(m_vma_allocator, staging_buffer.vk_handle, staging_buffer.vma_allocation);
+            });
         });
-    });
 
     vk::ImageView image_view = create_image_view(
-        m_vk_loader, m_vk_device, image.vk_handle, vk_format, vk::ImageAspectFlagBits::eColor, mip_levels);
+        m_vk_loader,
+        m_vk_device,
+        image.vk_handle,
+        vk_format,
+        vk::ImageAspectFlagBits::eColor,
+        depth == 1 ? vk::ImageViewType::e2D : vk::ImageViewType::e3D,
+        mip_levels);
 
     vk::Sampler sampler = create_texture_sampler(m_vk_loader, m_vk_physical_device, m_vk_device, mip_levels);
 
@@ -2705,6 +2755,7 @@ Texture Renderer::create_texture(const std::filesystem::path& path)
         TextureFormat::rgba,
         static_cast<uint32_t>(width),
         static_cast<uint32_t>(height),
+        1,
         reinterpret_cast<const std::byte*>(pixels));
 }
 

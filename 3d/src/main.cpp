@@ -1,18 +1,23 @@
 #include <iostream>
 
+#include <FastNoiseLite.h>
+
 #include "mve/detail/defs.hpp"
+#include "mve/math/math.hpp"
 #include "mve/renderer.hpp"
 #include "mve/shader.hpp"
 #include "mve/vertex_data.hpp"
 #include "mve/window.hpp"
 
+#include "camera.hpp"
 #include "logger.hpp"
+#include "util/fixed_loop.hpp"
 
 int main()
 {
     initLogger();
 
-    mve::Window window("Fluid Sim 3D", mve::Vector2i(800, 600), false);
+    mve::Window window("Fluid Sim 3D", mve::Vector2i(1400, 1400), false);
     mve::Renderer renderer(window, "Fluid Sim 3D", 1, 0, 0);
 
     mve::VertexLayout vertex_layout;
@@ -68,13 +73,49 @@ int main()
     mve::DescriptorSet global_descriptor = pipeline.create_descriptor_set(vert_shader.descriptor_set(0));
     mve::UniformBuffer global_ubo = renderer.create_uniform_buffer(vert_shader.descriptor_set(0).binding(0));
     global_descriptor.write_binding(vert_shader.descriptor_set(0).binding(0), global_ubo);
-    global_ubo.update(vert_shader.descriptor_set(0).binding(0).member("proj").location(), mve::Matrix4::identity());
-    global_ubo.update(
-        vert_shader.descriptor_set(0).binding(0).member("view").location(),
-        mve::Matrix4::identity().translate({ 0, 0, 1 }));
+    mve::Matrix4 proj = mve::perspective(90.0f, 1.0f, 0.001f, 100.0f);
+    global_ubo.update(vert_shader.descriptor_set(0).binding(0).member("proj").location(), proj);
 
+    Camera camera;
+
+    // Clouds Volume
+    const int width = 128;
+    const int height = 128;
+    const int depth = 128;
+    const float scale = 2.0f;
+
+    const int voxel_per_slice = width * height;
+    const int voxel_count = voxel_per_slice * depth;
+
+    std::vector<std::byte> buffer(voxel_count);
+
+    FastNoiseLite noise;
+    noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2S);
+
+    for (int i = 0; i < voxel_count; ++i) {
+        const int x = i % width;
+        const auto y = (i % voxel_per_slice) / width;
+        const auto z = i / voxel_per_slice;
+        const float p = noise.GetNoise((float)x * scale, (float)y * scale, (float)z * scale);
+        const float rand = (p + 1.0f) * 0.5f;
+        buffer[i] = (std::byte)mve::clamp((int)mve::round(rand * 16), 0, 16);
+    }
+
+    mve::Texture texture = renderer.create_texture(mve::TextureFormat::r, width, height, depth, buffer.data());
+
+    global_descriptor.write_binding(frag_shader.descriptor_set(0).binding(1), texture);
+
+    util::FixedLoop fixed_loop(60.0f);
+
+    window.disable_cursor();
     while (!window.should_close()) {
         window.poll_events();
+
+        camera.update(window);
+        fixed_loop.update(20, [&] { camera.fixed_update(window); });
+
+        global_ubo.update(
+            vert_shader.descriptor_set(0).binding(0).member("view").location(), camera.view_matrix(fixed_loop.blend()));
 
         renderer.begin_frame(window);
         renderer.begin_render_pass_present();
