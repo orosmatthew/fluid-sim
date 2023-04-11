@@ -10,6 +10,7 @@
 #include "mve/window.hpp"
 
 #include "camera.hpp"
+#include "fluid.hpp"
 #include "logger.hpp"
 #include "util/fixed_loop.hpp"
 
@@ -17,7 +18,7 @@ int main()
 {
     initLogger();
 
-    mve::Window window("Fluid Sim 3D", mve::Vector2i(1400, 1400), false);
+    mve::Window window("Fluid Sim 3D", mve::Vector2i(600, 600), true);
     mve::Renderer renderer(window, "Fluid Sim 3D", 1, 0, 0);
 
     mve::VertexLayout vertex_layout;
@@ -79,10 +80,10 @@ int main()
     Camera camera;
 
     // Clouds Volume
-    const int width = 128;
-    const int height = 128;
-    const int depth = 128;
-    const float scale = 2.0f;
+    const int width = 64;
+    const int height = 64;
+    const int depth = 64;
+    const float scale = 4.0f;
 
     const int voxel_per_slice = width * height;
     const int voxel_count = voxel_per_slice * depth;
@@ -107,9 +108,36 @@ int main()
 
     util::FixedLoop fixed_loop(60.0f);
 
+    window.set_resize_callback([&](mve::Vector2i new_size) {
+        renderer.resize(window);
+        mve::Matrix4 proj = mve::perspective(90.0f, (float)new_size.x / (float)new_size.y, 0.001f, 100.0f);
+        global_ubo.update(vert_shader.descriptor_set(0).binding(0).member("proj").location(), proj);
+    });
+
     window.disable_cursor();
+    bool cursor_captured = true;
     while (!window.should_close()) {
         window.poll_events();
+
+        if (window.is_key_pressed(mve::Key::c)) {
+            if (cursor_captured) {
+                window.enable_cursor();
+                cursor_captured = false;
+            }
+            else {
+                window.disable_cursor();
+                cursor_captured = true;
+            }
+        }
+
+        if (window.is_key_pressed(mve::Key::f)) {
+            if (window.is_fullscreen()) {
+                window.windowed();
+            }
+            else {
+                window.fullscreen(true);
+            }
+        }
 
         camera.update(window);
         fixed_loop.update(20, [&] { camera.fixed_update(window); });

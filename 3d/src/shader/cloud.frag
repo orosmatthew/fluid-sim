@@ -1,6 +1,6 @@
 #version 460
 
-#define NB_STEPS 100
+#define NB_STEPS 80
 
 struct Ray {
     vec3 origin;
@@ -79,11 +79,11 @@ void main() {
     for (int i = 0; i < NB_STEPS; ++i) {
         float s = texture(volume, ray.origin).r;
 
-//        vec3 gradient = computeGradient(ray.origin, delta);
-//        float NdotL = max(0.0, dot(gradient, light_dir));
+        //        vec3 gradient = computeGradient(ray.origin, delta);
+        //        float NdotL = max(0., dot(gradient, light_dir));
 
         acc.rgb += (1.0 - acc.a) * s * base_color; //* NdotL;
-        acc.a += (1.0 - acc.a) * s;// * 0.5;
+        acc.a += (1.0 - acc.a) * s; //* 0.5;
         ray.origin += ray.dir;
         dist += delta;
         if (dist >= far) { break; }
