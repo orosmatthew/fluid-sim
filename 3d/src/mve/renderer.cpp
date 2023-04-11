@@ -1926,10 +1926,10 @@ vk::Sampler Renderer::create_texture_sampler(
 {
     auto sampler_info
         = vk::SamplerCreateInfo()
-              .setMagFilter(vk::Filter::eNearest)
-              .setMinFilter(vk::Filter::eNearest)
-              //.setMagFilter(vk::Filter::eLinear)
-              //.setMinFilter(vk::Filter::eLinear)
+//              .setMagFilter(vk::Filter::eNearest)
+//              .setMinFilter(vk::Filter::eNearest)
+              .setMagFilter(vk::Filter::eLinear)
+              .setMinFilter(vk::Filter::eLinear)
               .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
               .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
               .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
@@ -1939,7 +1939,8 @@ vk::Sampler Renderer::create_texture_sampler(
               .setUnnormalizedCoordinates(VK_FALSE)
               .setCompareEnable(VK_FALSE)
               .setCompareOp(vk::CompareOp::eAlways)
-              .setMipmapMode(vk::SamplerMipmapMode::eNearest)
+//              .setMipmapMode(vk::SamplerMipmapMode::eNearest)
+              .setMipmapMode(vk::SamplerMipmapMode::eLinear)
               .setMipLodBias(0.0f)
               .setMinLod(0.0f)
               .setMaxLod(static_cast<float>(mip_levels));
@@ -2162,7 +2163,7 @@ void Renderer::cmd_generate_mipmaps(
             vk::ImageLayout::eTransferDstOptimal,
             1,
             &blit,
-            vk::Filter::eNearest);
+            vk::Filter::eLinear);
 
         barrier.setOldLayout(vk::ImageLayout::eTransferSrcOptimal);
         barrier.setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
