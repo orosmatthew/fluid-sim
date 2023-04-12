@@ -192,7 +192,9 @@ public:
 
     inline ~Texture();
 
-    [[nodiscard]] inline mve::Vector2i size() const;
+    inline void update(const std::byte* data) const;
+
+    [[nodiscard]] inline mve::Vector3i size() const;
 
     inline Texture& operator=(const Texture&) = delete;
 

@@ -1,6 +1,6 @@
 #version 460
 
-#define NB_STEPS 80
+#define NB_STEPS 100
 
 struct Ray {
     vec3 origin;

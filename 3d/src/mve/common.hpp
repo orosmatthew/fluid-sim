@@ -1,10 +1,10 @@
 #pragma once
 
- #define MVE_ENABLE_VALIDATION
+// #define MVE_ENABLE_VALIDATION
 
-#define MVE_ASSERT(expr, msg) \
-    if (!(expr)) { \
-        throw std::runtime_error(msg); \
+#define MVE_ASSERT(expr, msg)                                                                                          \
+    if (!(expr)) {                                                                                                     \
+        throw std::runtime_error(msg);                                                                                 \
     }
 
 #ifdef MVE_ENABLE_VALIDATION

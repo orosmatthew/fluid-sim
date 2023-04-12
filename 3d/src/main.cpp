@@ -17,6 +17,31 @@
 #include "text_pipeline.hpp"
 #include "util/fixed_loop.hpp"
 
+void fill_buffer(
+    FastNoiseLite& noise,
+    std::vector<std::byte>& buffer,
+    int width,
+    int height,
+    int depth,
+    float scale,
+    mve::Vector3 noise_offset)
+{
+    const int voxel_per_slice = width * height;
+    const int voxel_count = voxel_per_slice * depth;
+
+    noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2S);
+
+    for (int i = 0; i < voxel_count; ++i) {
+        const int x = i % width;
+        const auto y = (i % voxel_per_slice) / width;
+        const auto z = i / voxel_per_slice;
+        const float p = noise.GetNoise(
+            (float)x * scale + noise_offset.x, (float)y * scale + noise_offset.y, (float)z * scale + noise_offset.z);
+        const float rand = (p + 1.0f) * 0.5f;
+        buffer[i] = (std::byte)mve::clamp((int)mve::round(rand * 16), 0, 16);
+    }
+}
+
 int main()
 {
     initLogger();
@@ -87,23 +112,11 @@ int main()
     const int height = 64;
     const int depth = 64;
     const float scale = 4.0f;
-
-    const int voxel_per_slice = width * height;
-    const int voxel_count = voxel_per_slice * depth;
-
-    std::vector<std::byte> buffer(voxel_count);
+    std::vector<std::byte> buffer(width * height * depth);
 
     FastNoiseLite noise;
     noise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2S);
-
-    for (int i = 0; i < voxel_count; ++i) {
-        const int x = i % width;
-        const auto y = (i % voxel_per_slice) / width;
-        const auto z = i / voxel_per_slice;
-        const float p = noise.GetNoise((float)x * scale, (float)y * scale, (float)z * scale);
-        const float rand = (p + 1.0f) * 0.5f;
-        buffer[i] = (std::byte)mve::clamp((int)mve::round(rand * 16), 0, 16);
-    }
+    fill_buffer(noise, buffer, width, height, depth, scale, { 0, 0, 0 });
 
     mve::Texture texture = renderer.create_texture(mve::TextureFormat::r, width, height, depth, buffer.data());
 
@@ -125,8 +138,9 @@ int main()
     window.disable_cursor();
     bool cursor_captured = true;
     int current_frame_count = 0;
-    int frame_count = 0;
+    int frame_count;
     auto begin_time = std::chrono::steady_clock::time_point();
+    float noise_offset = 0.0f;
     while (!window.should_close()) {
         window.poll_events();
 
@@ -151,7 +165,12 @@ int main()
         }
 
         camera.update(window);
-        fixed_loop.update(20, [&] { camera.fixed_update(window); });
+        fixed_loop.update(20, [&] {
+            noise_offset -= 0.5f;
+            fill_buffer(noise, buffer, width, height, depth, scale, { 0, 0, noise_offset });
+            texture.update(buffer.data());
+            camera.fixed_update(window);
+        });
 
         global_ubo.update(
             vert_shader.descriptor_set(0).binding(0).member("view").location(), camera.view_matrix(fixed_loop.blend()));

@@ -167,6 +167,8 @@ public:
     Texture create_texture(
         TextureFormat format, uint32_t width, uint32_t height, uint32_t depth, const std::byte* data);
 
+    void update_texture(const Texture& texture, const std::byte* data);
+
     /**
      * @brief Create graphics pipeline from shaders and vertex layout
      * @param vertex_shader
@@ -308,7 +310,7 @@ public:
 
     [[nodiscard]] std::string gpu_name() const;
 
-    [[nodiscard]] mve::Vector2i texture_size(const mve::Texture& texture) const;
+    [[nodiscard]] mve::Vector3i texture_size(const mve::Texture& texture) const;
 
 private:
     struct QueueFamilyIndices {
@@ -353,8 +355,10 @@ private:
     struct Image {
         vk::Image vk_handle;
         VmaAllocation vma_allocation;
+        vk::Format format;
         uint32_t width;
         uint32_t height;
+        uint32_t depth;
     };
 
     struct RenderImage {

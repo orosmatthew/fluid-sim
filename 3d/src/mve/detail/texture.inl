@@ -20,7 +20,7 @@ inline Texture::~Texture()
         m_renderer->destroy(*this);
     }
 }
-mve::Vector2i Texture::size() const
+mve::Vector3i Texture::size() const
 {
     return m_renderer->texture_size(*this);
 }
@@ -68,6 +68,11 @@ inline void Texture::invalidate()
 inline Texture::Texture()
     : m_valid(false)
 {
+}
+
+void Texture::update(const std::byte* data) const
+{
+    m_renderer->update_texture(*this, data);
 }
 }
 

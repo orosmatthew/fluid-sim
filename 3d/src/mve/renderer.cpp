@@ -1926,8 +1926,8 @@ vk::Sampler Renderer::create_texture_sampler(
 {
     auto sampler_info
         = vk::SamplerCreateInfo()
-//              .setMagFilter(vk::Filter::eNearest)
-//              .setMinFilter(vk::Filter::eNearest)
+              //              .setMagFilter(vk::Filter::eNearest)
+              //              .setMinFilter(vk::Filter::eNearest)
               .setMagFilter(vk::Filter::eLinear)
               .setMinFilter(vk::Filter::eLinear)
               .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
@@ -1939,7 +1939,7 @@ vk::Sampler Renderer::create_texture_sampler(
               .setUnnormalizedCoordinates(VK_FALSE)
               .setCompareEnable(VK_FALSE)
               .setCompareOp(vk::CompareOp::eAlways)
-//              .setMipmapMode(vk::SamplerMipmapMode::eNearest)
+              //              .setMipmapMode(vk::SamplerMipmapMode::eNearest)
               .setMipmapMode(vk::SamplerMipmapMode::eLinear)
               .setMipLodBias(0.0f)
               .setMinLod(0.0f)
@@ -2071,7 +2071,7 @@ Renderer::Image Renderer::create_image(
     VkImage image;
     VmaAllocation image_allocation;
     vmaCreateImage(allocator, &image_info, &vma_alloc_info, &image, &image_allocation, nullptr);
-    return { image, image_allocation, width, height };
+    return { image, image_allocation, format, width, height, depth };
 }
 
 void Renderer::cmd_generate_mipmaps(
@@ -2637,6 +2637,51 @@ void Renderer::destroy(Texture& texture)
     });
 }
 
+void Renderer::update_texture(const mve::Texture& texture, const std::byte* data)
+{
+    MVE_VAL_ASSERT(m_textures.contains(texture.m_handle), "[Renderer] Invalid texture")
+    uint32_t mip_levels = 1;
+    TextureImpl& texture_impl = m_textures[texture.m_handle];
+    size_t size = texture_impl.image.width * texture_impl.image.height * texture_impl.image.depth * sizeof(std::byte);
+    Buffer staging_buffer = create_buffer(
+        m_vma_allocator,
+        size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+
+    void* data_ptr;
+    vmaMapMemory(m_vma_allocator, staging_buffer.vma_allocation, &data_ptr);
+    memcpy(data_ptr, data, static_cast<size_t>(size));
+    vmaUnmapMemory(m_vma_allocator, staging_buffer.vma_allocation);
+
+    vk::Image image = texture_impl.image.vk_handle;
+    uint32_t width = texture_impl.image.width;
+    uint32_t height = texture_impl.image.height;
+    uint32_t depth = texture_impl.image.depth;
+    vk::Format vk_format = texture_impl.image.format;
+    defer_to_command_buffer_front([this, image, mip_levels, staging_buffer, width, height, depth, vk_format](
+                                      vk::CommandBuffer command_buffer) {
+        cmd_transition_image_layout(
+            m_vk_loader,
+            command_buffer,
+            image,
+            vk_format,
+            vk::ImageLayout::eUndefined,
+            vk::ImageLayout::eTransferDstOptimal,
+            mip_levels);
+
+        cmd_copy_buffer_to_image(m_vk_loader, command_buffer, staging_buffer.vk_handle, image, width, height, depth);
+
+        cmd_generate_mipmaps(
+            m_vk_loader, m_vk_physical_device, command_buffer, image, vk_format, width, height, depth, mip_levels);
+
+        defer_to_next_frame([this, staging_buffer](uint32_t) {
+            vmaDestroyBuffer(m_vma_allocator, staging_buffer.vk_handle, staging_buffer.vma_allocation);
+        });
+    });
+}
+
 // TODO: mip-mapping
 Texture Renderer::create_texture(
     TextureFormat format, uint32_t width, uint32_t height, uint32_t depth, const std::byte* data)
@@ -3046,11 +3091,13 @@ std::string Renderer::gpu_name() const
 {
     return m_vk_physical_device.getProperties(m_vk_loader).deviceName;
 }
-mve::Vector2i Renderer::texture_size(const Texture& texture) const
+mve::Vector3i Renderer::texture_size(const Texture& texture) const
 {
-    MVE_VAL_ASSERT(texture.m_valid, "[Renderer] Attempt to get size on invalid texture");
+    MVE_VAL_ASSERT(texture.m_valid, "[Renderer] Attempt to get size on invalid texture")
     const TextureImpl& texture_impl = m_textures.at(texture.m_handle);
-    return { static_cast<int>(texture_impl.image.width), static_cast<int>(texture_impl.image.height) };
+    return { static_cast<int>(texture_impl.image.width),
+             static_cast<int>(texture_impl.image.height),
+             static_cast<int>(texture_impl.image.depth) };
 }
 
 Renderer::DescriptorSetAllocator::DescriptorSetAllocator()
