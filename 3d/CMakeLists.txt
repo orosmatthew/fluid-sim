@@ -57,6 +57,8 @@ set(SOURCE_FILES
         src/camera.cpp
         src/util/fixed_loop.cpp
         src/text_pipeline.cpp
+        src/wire_box_mesh.cpp
+        src/simple_pipeline.cpp
         )
 
 set(LIBS
@@ -91,5 +93,7 @@ add_shaders(fluid_sim_3d
         cloud.frag
         cloud.vert
         text.frag
-        text.vert)
+        text.vert
+        simple.vert
+        simple.frag)
 

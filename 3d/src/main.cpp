@@ -11,11 +11,13 @@
 #include "mve/window.hpp"
 
 #include "camera.hpp"
-#include "fluid.hpp"
+#include "fluid3d.hpp"
 #include "logger.hpp"
+#include "simple_pipeline.hpp"
 #include "text_buffer.hpp"
 #include "text_pipeline.hpp"
 #include "util/fixed_loop.hpp"
+#include "wire_box_mesh.hpp"
 
 void fill_buffer(
     FastNoiseLite& noise,
@@ -39,6 +41,20 @@ void fill_buffer(
             (float)x * scale + noise_offset.x, (float)y * scale + noise_offset.y, (float)z * scale + noise_offset.z);
         const float rand = (p + 1.0f) * 0.5f;
         buffer[i] = (std::byte)mve::clamp((int)mve::round(rand * 16), 0, 16);
+    }
+}
+
+void fill_buffer_fluid(const Fluid3D& fluid, std::vector<std::byte>& buffer, int width, int height, int depth)
+{
+    const int voxel_per_slice = width * height;
+    const int voxel_count = voxel_per_slice * depth;
+
+    for (int i = 0; i < voxel_count; ++i) {
+        const int x = i % width;
+        const auto y = (i % voxel_per_slice) / width;
+        const auto z = i / voxel_per_slice;
+        const float p = fluid.density_at(x, y, z);
+        buffer[i] = (std::byte)mve::clamp((int)p, 0, 255);
     }
 }
 
@@ -127,13 +143,29 @@ int main()
     TextPipeline text_pipeline(renderer, 36);
     TextBuffer fps_text = text_pipeline.create_text_buffer("FPS:", { 0, 0 }, 1.0f, { 1.0f, 1.0f, 1.0f });
 
+    SimplePipeline simple_pipeline(renderer);
+
     window.set_resize_callback([&](mve::Vector2i new_size) {
         renderer.resize(window);
         text_pipeline.resize();
+        simple_pipeline.resize(new_size);
         mve::Matrix4 proj = mve::perspective(90.0f, (float)new_size.x / (float)new_size.y, 0.001f, 100.0f);
         global_ubo.update(vert_shader.descriptor_set(0).binding(0).member("proj").location(), proj);
     });
     text_pipeline.resize();
+    simple_pipeline.resize({ 600, 600 });
+
+    BoundingBox bb = { { -0.5f, -0.5f, -0.5f }, { 0.5f, 0.5f, 0.5f } };
+    WireBoxMesh box(
+        renderer,
+        simple_pipeline.pipeline(),
+        simple_pipeline.model_descriptor_set(),
+        simple_pipeline.model_uniform_binding(),
+        bb,
+        0.01f,
+        { 1.0f, 1.0f, 1.0f });
+
+    Fluid3D fluid(64, 0.0f, 0.0f, 4);
 
     window.disable_cursor();
     bool cursor_captured = true;
@@ -164,19 +196,29 @@ int main()
             }
         }
 
+        if (window.is_mouse_button_down(mve::MouseButton::left)) {
+            fluid.add_density(32, 32, 32, 1000.0f);
+            fluid.add_velocity(32, 32, 32, 10.0f, 10.0f, 0.0f);
+        }
+
         camera.update(window);
-        fixed_loop.update(20, [&] {
+        fixed_loop.update(1, [&] {
             noise_offset -= 0.5f;
-            fill_buffer(noise, buffer, width, height, depth, scale, { 0, 0, noise_offset });
+            fluid.step(1.0f / 60.0f);
+            fill_buffer_fluid(fluid, buffer, width, height, depth);
             texture.update(buffer.data());
             camera.fixed_update(window);
         });
 
         global_ubo.update(
             vert_shader.descriptor_set(0).binding(0).member("view").location(), camera.view_matrix(fixed_loop.blend()));
+        simple_pipeline.set_view(camera.view_matrix(fixed_loop.blend()));
 
         renderer.begin_frame(window);
         renderer.begin_render_pass_present();
+
+        renderer.bind_graphics_pipeline(simple_pipeline.pipeline());
+        box.draw(simple_pipeline.global_descriptor_set());
 
         renderer.bind_graphics_pipeline(pipeline);
         renderer.bind_descriptor_set(global_descriptor);
