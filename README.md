@@ -8,6 +8,8 @@
 
 ![](https://raw.githubusercontent.com/orosmatthew/fluid-sim/master/media/fluid-sim-2d.gif)
 
+## Description
+
 This simulation was created as a final project for my Computational Physics class at Baldwin Wallace University.
 
 This project contains both a 2D and 3D fluid simulation. All 2D related code is in the `src/` directory while all 3D
