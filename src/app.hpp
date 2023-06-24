@@ -2,21 +2,27 @@
 
 #include <raylib-cpp.hpp>
 
+#ifdef ENABLE_MULTITHREADING
+#define FLUID_MULTITHREADING
+#endif
+
 #include "fluid.hpp"
 #include "util/fixed_loop.hpp"
 
 namespace rl = raylib;
+
+constexpr int g_sim_size = 256;
 
 class App {
 public:
     inline App()
         : m_window(1200, 1200, "Fluid Sim")
         , m_fixed_loop(60.0f)
-        , m_fluid(512, 0.0f, 0.0f, 4)
+        , m_fluid(g_sim_size, 0.0f, 0.0f, 4)
         , m_prev_pos()
-        , m_image(512, 512, rl::Color::Black())
+        , m_image(g_sim_size, g_sim_size, rl::Color::Black())
         , m_texture(m_image)
-        , m_scale(1200.0f / 512.0f)
+        , m_scale(1200.0f / static_cast<float>(g_sim_size))
     {
     }
 
@@ -93,7 +99,9 @@ private:
     };
 
     rl::Window m_window;
+#ifdef ENABLE_MULTITHREADING
     BS::thread_pool m_thread_pool {};
+#endif
     util::FixedLoop m_fixed_loop;
     Fluid m_fluid;
     rl::Vector2 m_prev_pos;
@@ -108,6 +116,7 @@ private:
 
     inline void draw_fluid()
     {
+#ifdef ENABLE_MULTITHREADING
         m_thread_pool
             .parallelize_loop(
                 m_fluid.size() * m_fluid.size(),
@@ -121,6 +130,15 @@ private:
                     }
                 })
             .wait();
+#else
+        for (int i = 0; i < m_fluid.size() * m_fluid.size(); i++) {
+            Vector2i pos = index_to_pos(i, m_fluid.size());
+            float d = m_fluid.density_at(pos.x, pos.y);
+            float c = map(d, 0.0f, 10000.0f, 0.0f, 255.0f);
+            c = std::clamp(c, 0.0f, 255.0f);
+            m_image.DrawPixel(pos.x, pos.y, rl::Color(0, static_cast<char>(c), static_cast<char>(c), 255));
+        }
+#endif
         m_texture.Update(m_image.data);
         m_texture.Draw(rl::Vector2(0, 0), 0.0f, m_scale);
     }

@@ -1,6 +1,8 @@
 #include "camera.hpp"
+#include "mve/math/math.hpp"
+
 Camera::Camera()
-    : m_body_transform(mve::Matrix4::identity())
+    : m_body_transform(mve::Matrix4::identity().translate(mve::Vector3(1.0f, 0.0f, 0.0f)))
     , m_head_transform(mve::Matrix4::identity())
     , m_prev_pos(mve::Vector3(0, 0, 0))
     , m_friction(0.3f)
