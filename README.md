@@ -1,6 +1,12 @@
 # Fluid Sim
 
+## 3D Simulation
 
+![](https://raw.githubusercontent.com/orosmatthew/fluid-sim/master/media/fluid-sim-3d.gif)
+
+## 2D Simulation
+
+![](https://raw.githubusercontent.com/orosmatthew/fluid-sim/master/media/fluid-sim-2d.gif)
 
 This simulation was created as a final project for my Computational Physics class at Baldwin Wallace University.
 
