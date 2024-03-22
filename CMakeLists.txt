@@ -4,11 +4,10 @@ project(fluid_sim)
 
 set(CMAKE_CXX_STANDARD 20)
 
-# TODO: Fix web export with multithrading
 if (EMSCRIPTEN)
-    add_compile_options("SHELL: -s USE_PTHREADS=1 -s USE_ATOMIC_HEAP=1")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -O3 -pthread -s USE_GLFW=3 -s ASSERTIONS=1 -s WASM=1 -s EXPORTED_FUNCTIONS=\"['_main', '_malloc']\" -s \"EXPORTED_RUNTIME_METHODS=['ccall']\"")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -O3 -s USE_GLFW=3 -s ASSERTIONS=1 -s WASM=1 -s EXPORTED_FUNCTIONS=\"['_main', '_malloc']\" -s \"EXPORTED_RUNTIME_METHODS=['ccall']\"")
 else ()
+    add_compile_definitions(ENABLE_MULTITHREADING)
     add_definitions(-DGRAPHICS_API_OPENGL_43)
 endif ()
 

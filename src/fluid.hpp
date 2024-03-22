@@ -5,7 +5,10 @@
 #include <functional>
 #include <vector>
 
+#ifdef FLUID_MULTITHREADING
 #include <BS_thread_pool.hpp>
+static std::optional<std::unique_ptr<BS::thread_pool>> g_thread_pool {};
+#endif
 
 class Fluid {
 public:
@@ -15,6 +18,12 @@ public:
         assert(diffusion >= 0.0f);
         assert(viscosity >= 0.0f);
         assert(iter > 0);
+
+#ifdef FLUID_MULTITHREADING
+        if (!g_thread_pool.has_value()) {
+            g_thread_pool = std::make_unique<BS::thread_pool>();
+        }
+#endif
 
         m_size = size;
         m_diff = diffusion;
@@ -52,7 +61,6 @@ public:
 
         diffuse(
             BoundaryType::neumann,
-            m_thread_pool,
             m_vel_x,
             m_vel_x_next,
             m_tmp,
@@ -62,7 +70,6 @@ public:
             m_lin_solve_iterations);
         diffuse(
             BoundaryType::neumann,
-            m_thread_pool,
             m_vel_y,
             m_vel_y_next,
             m_tmp,
@@ -71,21 +78,18 @@ public:
             m_size,
             m_lin_solve_iterations);
 
-        calc_pressure(
-            m_thread_pool, m_vel_x_next, m_vel_y_next, m_pressure, m_divergence, m_tmp, m_size, m_lin_solve_iterations);
-        correct_velocity(m_thread_pool, m_vel_x_next, m_vel_y_next, m_pressure, m_size);
+        calc_pressure(m_vel_x_next, m_vel_y_next, m_pressure, m_divergence, m_tmp, m_size, m_lin_solve_iterations);
+        correct_velocity(m_vel_x_next, m_vel_y_next, m_pressure, m_size);
 
-        advect(
-            m_thread_pool, BoundaryType::neumann, m_vel_x_next, m_vel_x, m_vel_x_next, m_vel_y_next, time_step, m_size);
-        advect(
-            m_thread_pool, BoundaryType::neumann, m_vel_y_next, m_vel_y, m_vel_x_next, m_vel_y_next, time_step, m_size);
+        advect(BoundaryType::neumann, m_vel_x_next, m_vel_x, m_vel_x_next, m_vel_y_next, time_step, m_size);
+        advect(BoundaryType::neumann, m_vel_y_next, m_vel_y, m_vel_x_next, m_vel_y_next, time_step, m_size);
 
-        calc_pressure(m_thread_pool, m_vel_x, m_vel_y, m_pressure, m_divergence, m_tmp, m_size, m_lin_solve_iterations);
-        correct_velocity(m_thread_pool, m_vel_x, m_vel_y, m_pressure, m_size);
+        calc_pressure(m_vel_x, m_vel_y, m_pressure, m_divergence, m_tmp, m_size, m_lin_solve_iterations);
+        correct_velocity(m_vel_x, m_vel_y, m_pressure, m_size);
 
         diffuse(
             BoundaryType::fixed,
-            m_thread_pool,
+
             m_density,
             m_s,
             m_tmp,
@@ -93,7 +97,7 @@ public:
             time_step,
             m_size,
             m_lin_solve_iterations);
-        advect(m_thread_pool, BoundaryType::fixed, m_s, m_density, m_vel_x, m_vel_y, time_step, m_size);
+        advect(BoundaryType::fixed, m_s, m_density, m_vel_x, m_vel_y, time_step, m_size);
 
         for (size_t i = 0; i < m_size * m_size; i++) {
             m_density[i] = std::clamp(m_density[i], 0.0f, 10000.0f);
@@ -141,8 +145,6 @@ private:
     int m_size;
     float m_diff;
     float m_viscosity;
-
-    BS::thread_pool m_thread_pool {};
 
     std::vector<float> m_s;
     std::vector<float> m_density;
@@ -250,7 +252,6 @@ private:
     }
 
     inline static void calc_pressure(
-        BS::thread_pool& thread_pool,
         const std::vector<float>& vel_x,
         const std::vector<float>& vel_y,
         std::vector<float>& pressure,
@@ -267,8 +268,9 @@ private:
         // (0) not accumulating nor depleting
         // This is used to compute the pressure field which helps to correct for numerical errors by conserving
         // mass, momentum and energy.
-        thread_pool
-            .parallelize_loop(
+#ifdef FLUID_MULTITHREADING
+        (*g_thread_pool)
+            ->parallelize_loop(
                 (size - 2) * (size - 2),
                 [&](int begin, int end) {
                     for (int i = begin; i < end; i++) {
@@ -280,6 +282,15 @@ private:
                     }
                 })
             .wait();
+#else
+        for (int i = 0; i < (size - 2) * (size - 2); i++) {
+            size_t idx = i + size + 1;
+            const float delta_x = vel_x[idx + 1] - vel_x[idx - 1];
+            const float delta_y = vel_y[idx + size] - vel_y[idx - size];
+            divergence[idx] = -0.5f * (delta_x + delta_y) / static_cast<float>(size);
+            pressure[idx] = 0;
+        }
+#endif
 
         set_bnd(BoundaryType::none, divergence, size);
         set_bnd(BoundaryType::none, pressure, size);
@@ -296,8 +307,9 @@ private:
         std::fill(tmp.begin(), tmp.end(), 0.0f);
         for (int t = 0; t < iter; t++) {
 
-            thread_pool
-                .parallelize_loop(
+#ifdef FLUID_MULTITHREADING
+            (*g_thread_pool)
+                ->parallelize_loop(
                     (size - 2) * (size - 2),
                     [&](int begin, int end) {
                         for (int i = begin; i < end; i++) {
@@ -306,22 +318,26 @@ private:
                         }
                     })
                 .wait();
+
+#else
+            for (int i = 0; i < (size - 2) * (size - 2); i++) {
+                int idx = i + size + 1;
+                tmp[idx] = linear_solve_point(idx, pressure, divergence, scalar_constant, c_inv, size);
+            }
+#endif
             std::swap(pressure, tmp);
             set_bnd(BoundaryType::none, pressure, size);
         }
     }
 
     inline static void correct_velocity(
-        BS::thread_pool& thread_pool,
-        std::vector<float>& vel_x,
-        std::vector<float>& vel_y,
-        const std::vector<float>& pressure,
-        int size)
+        std::vector<float>& vel_x, std::vector<float>& vel_y, const std::vector<float>& pressure, int size)
     {
         // Subtract the pressure gradient from the velocity field to ensure incompressibility
         // This ensures that the velocity field remains divergence-free
-        thread_pool
-            .parallelize_loop(
+#ifdef FLUID_MULTITHREADING
+        (*g_thread_pool)
+            ->parallelize_loop(
                 (size - 2) * (size - 2),
                 [&](int begin, int end) {
                     for (int i = begin; i < end; i++) {
@@ -332,13 +348,20 @@ private:
                     }
                 })
             .wait();
+#else
+
+        for (int i = 0; i < (size - 2) * (size - 2); i++) {
+            size_t idx = i + size + 1;
+            vel_x[idx] -= 0.5f * (pressure[idx + 1] - pressure[idx - 1]) * static_cast<float>(size);
+            vel_y[idx] -= 0.5f * (pressure[idx + size] - pressure[idx - size]) * static_cast<float>(size);
+        }
+#endif
 
         set_bnd(BoundaryType::neumann, vel_x, size);
         set_bnd(BoundaryType::neumann, vel_y, size);
     }
 
     inline static void advect(
-        BS::thread_pool& thread_pool,
         BoundaryType boundary_type,
         const std::vector<float>& from,
         std::vector<float>& to,
@@ -349,8 +372,9 @@ private:
     {
         Vector2 dt { time_step * (static_cast<float>(size) - 2), time_step * (static_cast<float>(size) - 2) };
 
-        thread_pool
-            .parallelize_loop(
+#ifdef FLUID_MULTITHREADING
+        (*g_thread_pool)
+            ->parallelize_loop(
                 (size - 2) * (size - 2),
                 [&](int begin, int end) {
                     for (int i = begin; i < end; i++) {
@@ -384,12 +408,39 @@ private:
                     }
                 })
             .wait();
+#else
+        for (int i = 0; i < (size - 2) * (size - 2); i++) {
+            // Index of current pos
+            const size_t current = i + size + 1;
+            const Vector2i pos = index_to_pos(current, size);
+            // displacement = dt * vel
+            const Vector2 displacement { dt.x * vel_x[current], dt.y * vel_y[current] };
+            // new_pos = pos - displacement
+            Vector2 new_pos { static_cast<float>(pos.x) - displacement.x, static_cast<float>(pos.y) - displacement.y };
+            // Clamp new position to size
+            new_pos.x = std::clamp(new_pos.x, 0.5f, static_cast<float>(size) - 2 + 0.5f);
+            new_pos.y = std::clamp(new_pos.y, 0.5f, static_cast<float>(size) - 2 + 0.5f);
+            // new_pos_i = int(floor(new_pos))
+            const Vector2i new_pos_i { static_cast<int>(floorf(new_pos.x)), static_cast<int>(floorf(new_pos.y)) };
+            // offset = new_pos - new_pos_i
+            const Vector2 offset { new_pos.x - static_cast<float>(new_pos_i.x),
+                                   new_pos.y - static_cast<float>(new_pos_i.y) };
+
+            // Neighboring indices of points in the direction of the displacement/velocity
+            const size_t neighbors[2][2]
+                = { { index(new_pos_i.x, new_pos_i.y, size), index(new_pos_i.x, new_pos_i.y + 1, size) },
+                    { index(new_pos_i.x + 1, new_pos_i.y, size), index(new_pos_i.x + 1, new_pos_i.y + 1, size) } };
+
+            // Perform bilinear interpolation between neighbors
+            to[current] = (1.0f - offset.x) * lerp(from[neighbors[0][0]], from[neighbors[0][1]], offset.y)
+                + offset.x * lerp(from[neighbors[1][0]], from[neighbors[1][1]], offset.y);
+        }
+#endif
         set_bnd(boundary_type, to, size);
     }
 
     inline static void diffuse(
         BoundaryType boundary_type,
-        BS::thread_pool& thread_pool,
         const std::vector<float>& from,
         std::vector<float>& to,
         std::vector<float>& tmp,
@@ -405,8 +456,9 @@ private:
         const float c_inv = 1.0f / (1 + 4 * a);
         std::fill(tmp.begin(), tmp.end(), 0.0f);
         for (int t = 0; t < iter; t++) {
-            thread_pool
-                .parallelize_loop(
+#ifdef FLUID_MULTITHREADING
+            (*g_thread_pool)
+                ->parallelize_loop(
                     (size - 2) * (size - 2),
                     [&](int begin, int end) {
                         for (int current = begin; current < end; current++) {
@@ -414,6 +466,11 @@ private:
                         }
                     })
                 .wait();
+#else
+            for (int current = 0; current < (size - 2) * (size - 2); current++) {
+                tmp[current + size + 1] = linear_solve_point(current + size + 1, to, from, a, c_inv, size);
+            }
+#endif
             std::swap(to, tmp);
             set_bnd(boundary_type, to, size);
         }
