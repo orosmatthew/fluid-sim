@@ -1,6 +1,7 @@
 #include <chrono>
 #include <iostream>
 
+#include <BS_thread_pool.hpp>
 #include <FastNoiseLite.h>
 
 #include "mve/detail/defs.hpp"
@@ -124,9 +125,9 @@ int main()
     Camera camera;
 
     // Clouds Volume
-    const int width = 64;
-    const int height = 64;
-    const int depth = 64;
+    const int width = 72;
+    const int height = 72;
+    const int depth = 72;
     const float scale = 4.0f;
     std::vector<std::byte> buffer(width * height * depth);
 
@@ -165,7 +166,9 @@ int main()
         0.01f,
         { 1.0f, 1.0f, 1.0f });
 
-    Fluid3D fluid(64, 0.0f, 0.0f, 4);
+    Fluid3D fluid(72, 0.0f, 0.0f, 4);
+
+    BS::thread_pool thread_pool;
 
     window.disable_cursor();
     bool cursor_captured = true;
@@ -198,16 +201,18 @@ int main()
 
         if (window.is_mouse_button_down(mve::MouseButton::left)) {
             fluid.add_density(32, 32, 32, 1000.0f);
+            // mve::Vector3 dir = camera.look_direction();
+            // LOG->info("DIR: ({}, {}, {})", dir.x, dir.y, dir.z);
             fluid.add_velocity(32, 32, 32, 10.0f, 10.0f, 0.0f);
         }
 
         camera.update(window);
         fixed_loop.update(1, [&] {
-            noise_offset -= 0.5f;
-            fluid.step(1.0f / 60.0f);
+            camera.fixed_update(window);
+            thread_pool.wait_for_tasks();
             fill_buffer_fluid(fluid, buffer, width, height, depth);
             texture.update(buffer.data());
-            camera.fixed_update(window);
+            thread_pool.push_task([&] { fluid.step(1.0f / 60.0f); });
         });
 
         global_ubo.update(

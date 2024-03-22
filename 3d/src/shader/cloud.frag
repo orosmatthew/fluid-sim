@@ -69,7 +69,8 @@ void main() {
     float delta = min(inc.x, min(inc.y, inc.z)) / float(NB_STEPS);
     ray.dir = ray.dir * delta;
 
-    vec3 base_color = vec3(0.4, 0.4, 0.5);
+//    vec3 base_color = vec3(0.4, 0.4, 0.5);
+    vec3 base_color = vec3(0.4, 1.0, 0.4);
     vec4 acc = vec4(0.0);
 
     vec3 light_dir = vec3(0.0, -1.0, -1.0);

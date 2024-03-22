@@ -134,7 +134,7 @@ bool Renderer::has_validation_layer_support(const vk::DispatchLoaderDynamic& loa
     for (const std::string& validation_layer : validation_layers) {
         bool layer_found = std::any_of(
             available_layers.cbegin(), available_layers.cend(), [&](const vk::LayerProperties& available_layer) {
-                return available_layer.layerName == validation_layer;
+                return available_layer.layerName.data() == validation_layer.data();
             });
         if (!layer_found) {
             return false;

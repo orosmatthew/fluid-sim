@@ -21,6 +21,15 @@ public:
         return view;
     }
 
+    [[nodiscard]] inline mve::Vector3 look_direction() const
+    {
+        mve::Matrix4 transform = m_head_transform * m_body_transform;
+        mve::Matrix3 basis = transform.basis().transpose();
+        mve::Vector3 direction { 0, 0, -1 };
+        direction = direction.rotate(basis);
+        return direction.normalize();
+    }
+
 private:
     mve::Matrix4 m_body_transform;
     mve::Matrix4 m_head_transform;

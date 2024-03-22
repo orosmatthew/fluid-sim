@@ -259,7 +259,7 @@ private:
             for (int i = 1; i < size - 1; i++) {
                 if (boundary_type == BoundaryType::neumann) {
                     x[index(i, j, 0, size)] = -x[index(i, j, 1, size)];
-                    x[index(i, j, size - 1, size)] = x[index(i, j, size - 2, size)];
+                    x[index(i, j, size - 1, size)] = -x[index(i, j, size - 2, size)];
                 }
                 else if (boundary_type == BoundaryType::fixed) {
                     x[index(i, j, 0, size)] = x[index(i, j, 1, size)];
