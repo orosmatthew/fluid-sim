@@ -1,6 +1,5 @@
 #pragma once
 
-#include "mve/common.hpp"
 #include "mve/renderer.hpp"
 
 class TextBuffer;
@@ -37,12 +36,12 @@ public:
 
     [[nodiscard]] float text_buffer_width(const TextBuffer& buffer) const;
 
-    [[nodiscard]] inline float point_size() const
+    [[nodiscard]] float point_size() const
     {
-        return c_point_size;
+        return static_cast<float>(c_point_size);
     }
 
-    [[nodiscard]] inline mve::Renderer& renderer()
+    [[nodiscard]] mve::Renderer& renderer() const
     {
         return *m_renderer;
     }

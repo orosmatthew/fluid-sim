@@ -11,20 +11,20 @@ public:
 
     void fixed_update(const mve::Window& window);
 
-    inline mve::Matrix4 view_matrix(float interpolation_weight) const
+    [[nodiscard]] mve::Matrix4 view_matrix(const float interpolation_weight) const
     {
-        mve::Matrix4 transform = m_head_transform * m_body_transform;
-        mve::Matrix3 basis = transform.basis();
-        mve::Matrix4 interpolated_transform = mve::Matrix4::from_basis_translation(
+        const mve::Matrix4 transform = m_head_transform * m_body_transform;
+        const mve::Matrix3 basis = transform.basis();
+        const mve::Matrix4 interpolated_transform = mve::Matrix4::from_basis_translation(
             basis, m_prev_pos.linear_interpolate(transform.translation(), interpolation_weight));
-        mve::Matrix4 view = interpolated_transform.inverse().transpose();
+        const mve::Matrix4 view = interpolated_transform.inverse().transpose();
         return view;
     }
 
-    [[nodiscard]] inline mve::Vector3 look_direction() const
+    [[nodiscard]] mve::Vector3 look_direction() const
     {
-        mve::Matrix4 transform = m_head_transform * m_body_transform;
-        mve::Matrix3 basis = transform.basis().transpose();
+        const mve::Matrix4 transform = m_head_transform * m_body_transform;
+        const mve::Matrix3 basis = transform.basis().transpose();
         mve::Vector3 direction { 0, 0, -1 };
         direction = direction.rotate(basis);
         return direction.normalize();

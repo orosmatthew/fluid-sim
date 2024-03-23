@@ -12,7 +12,7 @@ Camera::Camera()
 }
 void Camera::update(const mve::Window& window)
 {
-    mve::Vector2 mouse_delta = window.mouse_delta();
+    const mve::Vector2 mouse_delta = window.mouse_delta();
     m_body_transform = m_body_transform.rotate_local({ 0, 0, 1 }, -mouse_delta.x * 0.001f);
     m_head_transform = m_head_transform.rotate_local({ 1, 0, 0 }, -mouse_delta.y * 0.001f);
     mve::Vector3 head_euler = m_head_transform.euler();

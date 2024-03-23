@@ -1,5 +1,4 @@
 #include <chrono>
-#include <iostream>
 
 #include <BS_thread_pool.hpp>
 #include <FastNoiseLite.h>
@@ -23,11 +22,11 @@
 void fill_buffer(
     FastNoiseLite& noise,
     std::vector<std::byte>& buffer,
-    int width,
-    int height,
-    int depth,
-    float scale,
-    mve::Vector3 noise_offset)
+    const int width,
+    const int height,
+    const int depth,
+    const float scale,
+    const mve::Vector3 noise_offset)
 {
     const int voxel_per_slice = width * height;
     const int voxel_count = voxel_per_slice * depth;
@@ -39,13 +38,16 @@ void fill_buffer(
         const auto y = (i % voxel_per_slice) / width;
         const auto z = i / voxel_per_slice;
         const float p = noise.GetNoise(
-            (float)x * scale + noise_offset.x, (float)y * scale + noise_offset.y, (float)z * scale + noise_offset.z);
+            static_cast<float>(x) * scale + noise_offset.x,
+            static_cast<float>(y) * scale + noise_offset.y,
+            static_cast<float>(z) * scale + noise_offset.z);
         const float rand = (p + 1.0f) * 0.5f;
-        buffer[i] = (std::byte)mve::clamp((int)mve::round(rand * 16), 0, 16);
+        buffer[i] = static_cast<std::byte>(mve::clamp(static_cast<int>(mve::round(rand * 16)), 0, 16));
     }
 }
 
-void fill_buffer_fluid(const Fluid3D& fluid, std::vector<std::byte>& buffer, int width, int height, int depth)
+void fill_buffer_fluid(
+    const Fluid3D& fluid, std::vector<std::byte>& buffer, const int width, const int height, const int depth)
 {
     const int voxel_per_slice = width * height;
     const int voxel_count = voxel_per_slice * depth;
@@ -55,7 +57,7 @@ void fill_buffer_fluid(const Fluid3D& fluid, std::vector<std::byte>& buffer, int
         const auto y = (i % voxel_per_slice) / width;
         const auto z = i / voxel_per_slice;
         const float p = fluid.density_at(x, y, z);
-        buffer[i] = (std::byte)mve::clamp((int)p, 0, 255);
+        buffer[i] = static_cast<std::byte>(mve::clamp(static_cast<int>(p), 0, 255));
     }
 }
 
@@ -125,10 +127,10 @@ int main()
     Camera camera;
 
     // Clouds Volume
-    const int width = 72;
-    const int height = 72;
-    const int depth = 72;
-    const float scale = 4.0f;
+    constexpr int width = 72;
+    constexpr int height = 72;
+    constexpr int depth = 72;
+    constexpr float scale = 4.0f;
     std::vector<std::byte> buffer(width * height * depth);
 
     FastNoiseLite noise;
@@ -146,12 +148,13 @@ int main()
 
     SimplePipeline simple_pipeline(renderer);
 
-    window.set_resize_callback([&](mve::Vector2i new_size) {
+    window.set_resize_callback([&](const mve::Vector2i new_size) {
         renderer.resize(window);
         text_pipeline.resize();
         simple_pipeline.resize(new_size);
-        mve::Matrix4 proj = mve::perspective(90.0f, (float)new_size.x / (float)new_size.y, 0.001f, 100.0f);
-        global_ubo.update(vert_shader.descriptor_set(0).binding(0).member("proj").location(), proj);
+        const mve::Matrix4 new_proj
+            = mve::perspective(90.0f, static_cast<float>(new_size.x) / static_cast<float>(new_size.y), 0.001f, 100.0f);
+        global_ubo.update(vert_shader.descriptor_set(0).binding(0).member("proj").location(), new_proj);
     });
     text_pipeline.resize();
     simple_pipeline.resize({ 600, 600 });
@@ -175,7 +178,6 @@ int main()
     int current_frame_count = 0;
     int frame_count;
     auto begin_time = std::chrono::steady_clock::time_point();
-    float noise_offset = 0.0f;
     while (!window.should_close()) {
         window.poll_events();
 
@@ -197,6 +199,10 @@ int main()
             else {
                 window.fullscreen(true);
             }
+        }
+
+        if (window.is_key_pressed(mve::Key::escape)) {
+            break;
         }
 
         if (window.is_mouse_button_down(mve::MouseButton::left)) {
@@ -235,9 +241,8 @@ int main()
         renderer.end_render_pass_present();
         renderer.end_frame(window);
 
-        std::chrono::high_resolution_clock::time_point end_time = std::chrono::high_resolution_clock::now();
-
-        if (std::chrono::duration_cast<std::chrono::microseconds>(end_time - begin_time).count() >= 1000000) {
+        if (std::chrono::high_resolution_clock::time_point end_time = std::chrono::high_resolution_clock::now();
+            std::chrono::duration_cast<std::chrono::microseconds>(end_time - begin_time).count() >= 1000000) {
             begin_time = std::chrono::high_resolution_clock::now();
             frame_count = current_frame_count;
             fps_text.update("FPS:" + std::to_string(frame_count));
