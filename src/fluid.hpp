@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <cassert>
 #include <functional>
 #include <vector>
@@ -12,7 +11,7 @@ static std::optional<std::unique_ptr<BS::thread_pool>> g_thread_pool {};
 
 class Fluid {
 public:
-    inline Fluid(int size, float diffusion, float viscosity, int iter)
+    Fluid(const int size, const float diffusion, const float viscosity, const int iter)
     {
         assert(size > 0);
         assert(diffusion >= 0.0f);
@@ -29,7 +28,7 @@ public:
         m_diff = diffusion;
         m_viscosity = viscosity;
 
-        std::vector<float> empty(size * size, 0.0f);
+        const std::vector empty(size * size, 0.0f);
         m_s = empty;
         m_density = empty;
 
@@ -47,7 +46,7 @@ public:
         m_lin_solve_iterations = iter;
     }
 
-    inline void step(float time_step)
+    void step(const float time_step)
     {
         for (size_t i = 0; i < m_size * m_size; i++) {
             m_density[i] = std::clamp(m_density[i], 0.0f, 10000.0f);
@@ -104,29 +103,29 @@ public:
         }
     }
 
-    inline void add_velocity(int x, int y, float amount_x, float amount_y)
+    void add_velocity(const int x, const int y, const float amount_x, const float amount_y)
     {
-        size_t i = index(x, y, m_size);
+        const size_t i = index(x, y, m_size);
         m_vel_x[i] += amount_x;
         m_vel_y[i] += amount_y;
     }
 
-    inline void add_density(int x, int y, float amount)
+    void add_density(const int x, const int y, const float amount)
     {
         m_density[index(x, y, m_size)] += amount;
     }
 
-    [[nodiscard]] inline float density_at(int x, int y) const
+    [[nodiscard]] float density_at(const int x, const int y) const
     {
         return m_density[index(x, y, m_size)];
     }
 
-    [[nodiscard]] inline float pressure_at(int x, int y) const
+    [[nodiscard]] float pressure_at(const int x, const int y) const
     {
         return m_pressure[index(x, y, m_size)];
     }
 
-    [[nodiscard]] inline int size() const
+    [[nodiscard]] int size() const
     {
         return m_size;
     }
@@ -162,12 +161,12 @@ private:
 
     int m_lin_solve_iterations;
 
-    inline static float lerp(float a, float b, float t)
+    static float lerp(const float a, const float b, const float t)
     {
         return a * (1 - t) + b * t;
     };
 
-    inline static void for_2d(const Vector2i& min, const Vector2i& max, std::function<void(Vector2i)> func)
+    static void for_2d(const Vector2i& min, const Vector2i& max, std::function<void(Vector2i)> func)
     {
         for (int i = min.x; i < max.x; i++) {
             for (int j = min.y; j < max.y; j++) {
@@ -176,12 +175,12 @@ private:
         }
     }
 
-    inline static size_t index(int x, int y, int size)
+    static size_t index(const int x, const int y, const int size)
     {
         return static_cast<size_t>(x) + static_cast<size_t>(y) * size;
     }
 
-    inline static Vector2i index_to_pos(size_t index, int size)
+    static Vector2i index_to_pos(const size_t index, const int size)
     {
         return { .x = static_cast<int>(index % size), .y = static_cast<int>(index / size) };
     }
@@ -192,7 +191,7 @@ private:
         neumann // Neumann boundary condition, aka zero-gradient condition
     };
 
-    inline static void set_bnd(BoundaryType boundary_type, std::vector<float>& x, int size)
+    static void set_bnd(const BoundaryType boundary_type, std::vector<float>& x, const int size)
     {
         // Boundary conditions for left and right
         for (int i = 1; i < size - 1; i++) {
@@ -239,26 +238,31 @@ private:
     //      adj
     //  adj pos adj
     //      adj
-    inline static float linear_solve_point(
-        size_t index, const std::vector<float>& dest, const std::vector<float>& src, float a, float c_inv, int size)
+    static float linear_solve_point(
+        const size_t index,
+        const std::vector<float>& dest,
+        const std::vector<float>& src,
+        const float a,
+        const float c_inv,
+        const int size)
     {
 
-        float neighbor_sum = dest[index + 1] + dest[index - 1] + dest[index + size] + dest[index - size];
+        const float neighbor_sum = dest[index + 1] + dest[index - 1] + dest[index + size] + dest[index - size];
 
         // Contribution of the laplacian operator to the new value of the current point
-        float laplacian_contribution = a * neighbor_sum;
+        const float laplacian_contribution = a * neighbor_sum;
 
         return (src[index] + laplacian_contribution) * c_inv;
     }
 
-    inline static void calc_pressure(
+    static void calc_pressure(
         const std::vector<float>& vel_x,
         const std::vector<float>& vel_y,
         std::vector<float>& pressure,
         std::vector<float>& divergence,
         std::vector<float>& tmp,
         int size,
-        int iter)
+        const int iter)
     {
         // Calculate the divergence of the velocity field.
         // Divergence in the velocity field is a scalar value that measures how much the fluid is flowing outward or
@@ -272,9 +276,9 @@ private:
         (*g_thread_pool)
             ->parallelize_loop(
                 (size - 2) * (size - 2),
-                [&](int begin, int end) {
+                [&](const int begin, const int end) {
                     for (int i = begin; i < end; i++) {
-                        size_t index = i + size + 1;
+                        const size_t index = i + size + 1;
                         const float delta_x = vel_x[index + 1] - vel_x[index - 1];
                         const float delta_y = vel_y[index + size] - vel_y[index - size];
                         divergence[index] = -0.5f * (delta_x + delta_y) / static_cast<float>(size);
@@ -296,24 +300,24 @@ private:
         set_bnd(BoundaryType::none, pressure, size);
 
         // Scalar constant is used to scale the result of the Poisson equation before updating pressure
-        const float scalar_constant = 1.5f;
+        constexpr float scalar_constant = 1.5f;
 
         // The discretization constant is needed to discretize continuous equations.
         // Represents spacing or step size between points
-        const float discretization_constant = 6.0f;
+        constexpr float discretization_constant = 6.0f;
 
         // Solve for pressure by solving the Poisson equation using the divergence of the velocity field as the source.
-        const float c_inv = 1.0f / discretization_constant;
-        std::fill(tmp.begin(), tmp.end(), 0.0f);
+        constexpr float c_inv = 1.0f / discretization_constant;
+        std::ranges::fill(tmp, 0.0f);
         for (int t = 0; t < iter; t++) {
 
 #ifdef FLUID_MULTITHREADING
             (*g_thread_pool)
                 ->parallelize_loop(
                     (size - 2) * (size - 2),
-                    [&](int begin, int end) {
+                    [&](const int begin, const int end) {
                         for (int i = begin; i < end; i++) {
-                            int index = i + size + 1;
+                            const int index = i + size + 1;
                             tmp[index] = linear_solve_point(index, pressure, divergence, scalar_constant, c_inv, size);
                         }
                     })
@@ -330,7 +334,7 @@ private:
         }
     }
 
-    inline static void correct_velocity(
+    static void correct_velocity(
         std::vector<float>& vel_x, std::vector<float>& vel_y, const std::vector<float>& pressure, int size)
     {
         // Subtract the pressure gradient from the velocity field to ensure incompressibility
@@ -339,9 +343,9 @@ private:
         (*g_thread_pool)
             ->parallelize_loop(
                 (size - 2) * (size - 2),
-                [&](int begin, int end) {
+                [&](const int begin, const int end) {
                     for (int i = begin; i < end; i++) {
-                        size_t index = i + size + 1;
+                        const size_t index = i + size + 1;
                         vel_x[index] -= 0.5f * (pressure[index + 1] - pressure[index - 1]) * static_cast<float>(size);
                         vel_y[index]
                             -= 0.5f * (pressure[index + size] - pressure[index - size]) * static_cast<float>(size);
@@ -361,13 +365,13 @@ private:
         set_bnd(BoundaryType::neumann, vel_y, size);
     }
 
-    inline static void advect(
-        BoundaryType boundary_type,
+    static void advect(
+        const BoundaryType boundary_type,
         const std::vector<float>& from,
         std::vector<float>& to,
         const std::vector<float>& vel_x,
         const std::vector<float>& vel_y,
-        float time_step,
+        const float time_step,
         int size)
     {
         Vector2 dt { time_step * (static_cast<float>(size) - 2), time_step * (static_cast<float>(size) - 2) };
@@ -376,16 +380,16 @@ private:
         (*g_thread_pool)
             ->parallelize_loop(
                 (size - 2) * (size - 2),
-                [&](int begin, int end) {
+                [&](const int begin, const int end) {
                     for (int i = begin; i < end; i++) {
                         // Index of current pos
                         const size_t current = i + size + 1;
-                        const Vector2i pos = index_to_pos(current, size);
+                        const auto [x, y] = index_to_pos(current, size);
                         // displacement = dt * vel
                         const Vector2 displacement { dt.x * vel_x[current], dt.y * vel_y[current] };
                         // new_pos = pos - displacement
-                        Vector2 new_pos { static_cast<float>(pos.x) - displacement.x,
-                                          static_cast<float>(pos.y) - displacement.y };
+                        Vector2 new_pos { static_cast<float>(x) - displacement.x,
+                                          static_cast<float>(y) - displacement.y };
                         // Clamp new position to size
                         new_pos.x = std::clamp(new_pos.x, 0.5f, static_cast<float>(size) - 2 + 0.5f);
                         new_pos.y = std::clamp(new_pos.y, 0.5f, static_cast<float>(size) - 2 + 0.5f);
@@ -439,28 +443,28 @@ private:
         set_bnd(boundary_type, to, size);
     }
 
-    inline static void diffuse(
-        BoundaryType boundary_type,
+    static void diffuse(
+        const BoundaryType boundary_type,
         const std::vector<float>& from,
         std::vector<float>& to,
         std::vector<float>& tmp,
-        float diffusion_constant,
-        float time_step,
+        const float diffusion_constant,
+        const float time_step,
         int size,
-        int iter)
+        const int iter)
     {
         // Scaling factor for linear solving.
         // Higher value results in faster rate of diffusion.
         const float a
             = time_step * diffusion_constant * (static_cast<float>(size) - 2) * (static_cast<float>(size) - 2);
         const float c_inv = 1.0f / (1 + 4 * a);
-        std::fill(tmp.begin(), tmp.end(), 0.0f);
+        std::ranges::fill(tmp, 0.0f);
         for (int t = 0; t < iter; t++) {
 #ifdef FLUID_MULTITHREADING
             (*g_thread_pool)
                 ->parallelize_loop(
                     (size - 2) * (size - 2),
-                    [&](int begin, int end) {
+                    [&](const int begin, const int end) {
                         for (int current = begin; current < end; current++) {
                             tmp[current + size + 1] = linear_solve_point(current + size + 1, to, from, a, c_inv, size);
                         }
